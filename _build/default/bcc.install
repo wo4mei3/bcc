@@ -1,8 +1,0 @@
-lib: [
-  "_build/install/default/lib/bcc/META"
-  "_build/install/default/lib/bcc/dune-package"
-  "_build/install/default/lib/bcc/opam"
-]
-bin: [
-  "_build/install/default/bin/bcc"
-]
