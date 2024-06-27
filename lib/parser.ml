@@ -139,7 +139,7 @@ let peek2 lexer lexbuf =
 let next () = lookup_tokens := List.tl !lookup_tokens
 
 let expected lexer lexbuf token =
-  if peek1 lexer lexbuf = token then failwith "hoge expected" else next ()
+  if peek1 lexer lexbuf = token then next () else failwith "hoge expected"
 
 let consume lexer lexbuf token =
   if peek1 lexer lexbuf = token then false
@@ -147,15 +147,51 @@ let consume lexer lexbuf token =
     next ();
     true)
 
-let rec parse_declspec lexer lexbuf typespec_done =
+let rec parse_declspec lexer lexbuf unique nonunique =
   match peek1 lexer lexbuf with
+  | (TVOID | TBOOL | VA_LIST | TYPE_ID _) when not (unique || nonunique) ->
+      next ();
+      parse_declspec lexer lexbuf true nonunique
+  | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED)
+    when not unique ->
+      next ();
+      parse_declspec lexer lexbuf unique true
   | TVOID | TBOOL | VA_LIST | TYPE_ID _ | TCHAR | TSHORT | TINT | TLONG | TFLOAT
   | TDOUBLE | TSIGNED | TUNSIGNED ->
-      next ();
-      parse_declspec lexer lexbuf true
+      failwith "expected declarator"
   | TYPEDEF | EXTERN | STATIC | AUTO | REGISTER | CONST | VOLATILE | INLINE
   | NORETURN ->
       next ();
-      parse_declspec lexer lexbuf typespec_done
-  | (STAR | LPAREN | ID _) when typespec_done -> ()
-  | _ -> failwith "expected declaration specifiers"
+      parse_declspec lexer lexbuf unique nonunique
+  | _ when unique || nonunique -> ()
+  | _ -> failwith "expected a type specifier"
+
+let rec parse_declarator lexer lexbuf =
+  match peek1 lexer lexbuf with
+  | STAR ->
+      next ();
+      parse_declarator lexer lexbuf
+  | ID _ | LPAREN -> parse_direct_declarator lexer lexbuf
+  | _ -> failwith "expected a declarator"
+
+and parse_direct_declarator lexer lexbuf =
+  (match peek1 lexer lexbuf with
+  | ID _ -> next ()
+  | LPAREN ->
+      next ();
+      parse_declarator lexer lexbuf;
+      expected lexer lexbuf RPAREN
+  | _ -> failwith "expected a parse_direct_declaratator");
+  parse_type_suffix lexer lexbuf
+
+and parse_type_suffix lexer lexbuf =
+  match peek1 lexer lexbuf with
+  | LPAREN ->
+      next ();
+      if peek1 lexer lexbuf = TVOID && peek2 lexer lexbuf = RPAREN then (
+        next ();
+        next ())
+      else parse_func_params lexer lexbuf
+  | _ -> print_endline "aaa"
+
+and parse_func_params lexer lexbuf = expected lexer lexbuf RPAREN
