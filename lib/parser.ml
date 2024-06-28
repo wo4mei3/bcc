@@ -192,6 +192,28 @@ and parse_type_suffix lexer lexbuf =
         next ();
         next ())
       else parse_func_params lexer lexbuf
-  | _ -> print_endline "aaa"
+  | LBRACKET ->
+      next ();
+      parse_array_dims lexer lexbuf
+  | _ -> ()
 
-and parse_func_params lexer lexbuf = expected lexer lexbuf RPAREN
+and parse_func_params lexer lexbuf =
+  if peek1 lexer lexbuf = RPAREN then next ()
+  else if peek1 lexer lexbuf = COMMA then (
+    next ();
+    parse_declspec lexer lexbuf false false;
+    parse_declarator lexer lexbuf;
+    parse_func_params lexer lexbuf)
+  else (
+    parse_declspec lexer lexbuf false false;
+    parse_declarator lexer lexbuf;
+    parse_func_params lexer lexbuf)
+
+and parse_array_dims lexer lexbuf =
+  if peek1 lexer lexbuf = RBRACKET then next ()
+  else
+    match peek1 lexer lexbuf with
+    | INT _ ->
+        next ();
+        parse_array_dims lexer lexbuf
+    | _ -> failwith "expected a RBRACKET"
