@@ -217,3 +217,100 @@ and parse_array_dims lexer lexbuf =
         next ();
         parse_array_dims lexer lexbuf
     | _ -> failwith "expected a RBRACKET"
+
+let parse_int lexer lexbuf =
+  match peek1 lexer lexbuf with
+  | INT _ -> next ()
+  | _ -> failwith "expected a integer literal"
+
+let parse_mul lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | STAR ->
+        next ();
+        parse_int lexer lexbuf;
+        aux lexer lexbuf
+    | DIV ->
+        next ();
+        parse_int lexer lexbuf;
+        aux lexer lexbuf
+    | MOD ->
+        next ();
+        parse_int lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_int lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_add lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | PLUS ->
+        next ();
+        parse_mul lexer lexbuf;
+        aux lexer lexbuf
+    | MINUS ->
+        next ();
+        parse_mul lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_mul lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_shift lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | LSHIFT ->
+        next ();
+        parse_add lexer lexbuf;
+        aux lexer lexbuf
+    | RSHIFT ->
+        next ();
+        parse_add lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_add lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_relational lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | LT ->
+        next ();
+        parse_shift lexer lexbuf;
+        aux lexer lexbuf
+    | GT ->
+        next ();
+        parse_shift lexer lexbuf;
+        aux lexer lexbuf
+    | LE ->
+        next ();
+        parse_shift lexer lexbuf;
+        aux lexer lexbuf
+    | GE ->
+        next ();
+        parse_shift lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_shift lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_equality lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | EQEQ ->
+        next ();
+        parse_relational lexer lexbuf;
+        aux lexer lexbuf
+    | NE ->
+        next ();
+        parse_relational lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_relational lexer lexbuf;
+  aux lexer lexbuf
