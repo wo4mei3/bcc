@@ -138,7 +138,7 @@ let peek2 lexer lexbuf =
 
 let next () = lookup_tokens := List.tl !lookup_tokens
 
-let expected lexer lexbuf token =
+let expect lexer lexbuf token =
   if peek1 lexer lexbuf = token then next () else failwith "hoge expected"
 
 let consume lexer lexbuf token =
@@ -180,7 +180,7 @@ and parse_direct_declarator lexer lexbuf =
   | LPAREN ->
       next ();
       parse_declarator lexer lexbuf;
-      expected lexer lexbuf RPAREN
+      expect lexer lexbuf RPAREN
   | _ -> failwith "expected a parse_direct_declaratator");
   parse_type_suffix lexer lexbuf
 
@@ -313,4 +313,138 @@ let parse_equality lexer lexbuf =
     | _ -> ()
   in
   parse_relational lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_and lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | AND ->
+        next ();
+        parse_equality lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_equality lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_xor lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | HAT ->
+        next ();
+        parse_and lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_and lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_or lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | OR ->
+        next ();
+        parse_xor lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_xor lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_logand lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | ANDAND ->
+        next ();
+        parse_or lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_or lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_logor lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | OROR ->
+        next ();
+        parse_logand lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_logand lexer lexbuf;
+  aux lexer lexbuf
+
+let rec parse_conditional lexer lexbuf =
+  parse_logor lexer lexbuf;
+  match peek1 lexer lexbuf with
+  | QUESTION ->
+      next ();
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf COLON;
+      parse_conditional lexer lexbuf
+  | _ -> ()
+
+and parse_assign lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | ADD_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | SUB_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | MUL_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | DIV_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | MOD_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | AND_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | OR_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | XOR_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | LSHIFT_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | RSHIFT_EQ ->
+        next ();
+        parse_conditional lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_conditional lexer lexbuf;
+  aux lexer lexbuf
+
+and parse_expr lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | COMMA ->
+        next ();
+        parse_assign lexer lexbuf;
+        aux lexer lexbuf
+    | _ -> ()
+  in
+  parse_assign lexer lexbuf;
   aux lexer lexbuf
