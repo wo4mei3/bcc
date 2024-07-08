@@ -1,4 +1,6 @@
 (library
+ (preprocess
+  (pps ppx_deriving.show))
  (name bcc))
 
 (ocamllex lexer)

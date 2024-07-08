@@ -100,6 +100,7 @@ type token =
   | ANDAND
   | AND
   | ADD_EQ
+[@@deriving show]
 
 (*
 open Env 
@@ -141,7 +142,8 @@ let next lexer lexbuf =
   lookup_tokens := List.tl !lookup_tokens
 
 let expect lexer lexbuf token =
-  if peek1 lexer lexbuf = token then next lexer lexbuf else failwith "hoge expected"
+  if peek1 lexer lexbuf = token then next lexer lexbuf
+  else failwith (Printf.sprintf "%s expected" (show_token token))
 
 let consume lexer lexbuf token =
   if peek1 lexer lexbuf = token then false
@@ -226,25 +228,36 @@ and parse_type_suffix lexer lexbuf =
   | _ -> ()
 
 and parse_func_params lexer lexbuf =
-  if peek1 lexer lexbuf = RPAREN then next lexer lexbuf
-  else if peek1 lexer lexbuf = COMMA then (
-    next lexer lexbuf;
-    parse_declspec lexer lexbuf;
-    parse_declarator lexer lexbuf;
-    parse_func_params lexer lexbuf)
-  else (
-    parse_declspec lexer lexbuf;
-    parse_declarator lexer lexbuf;
-    parse_func_params lexer lexbuf)
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | COMMA ->
+        next lexer lexbuf;
+        parse_declspec lexer lexbuf;
+        parse_declarator lexer lexbuf;
+        aux lexer lexbuf
+    | RPAREN ->
+        next lexer lexbuf;
+        parse_type_suffix lexer lexbuf
+    | _ -> failwith "expected a RBRACKET"
+  in
+  match peek1 lexer lexbuf with
+  | RPAREN ->
+      next lexer lexbuf;
+      parse_type_suffix lexer lexbuf
+  | _ ->
+      parse_declspec lexer lexbuf;
+      parse_declarator lexer lexbuf;
+      aux lexer lexbuf
 
 and parse_array_dims lexer lexbuf =
-  if peek1 lexer lexbuf = RBRACKET then next lexer lexbuf
-  else
-    match peek1 lexer lexbuf with
-    | INT _ ->
-        next lexer lexbuf;
-        parse_array_dims lexer lexbuf
-    | _ -> failwith "expected a RBRACKET"
+  match peek1 lexer lexbuf with
+  | INT _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf RBRACKET;
+      parse_type_suffix lexer lexbuf
+  | _ ->
+      expect lexer lexbuf RBRACKET;
+      parse_type_suffix lexer lexbuf
 
 and parse_typename lexer lexbuf =
   parse_declspec lexer lexbuf;
@@ -256,7 +269,9 @@ let parse_primary lexer lexbuf =
   | INT _ -> next lexer lexbuf
   | CHAR _ -> next lexer lexbuf
   | STR _ -> next lexer lexbuf
-  | _ -> failwith "expected a expression"
+  | _ ->
+      print_endline (show_token (List.hd !lookup_tokens));
+      failwith "expected a expression"
 
 let parse_postfix lexer lexbuf =
   let rec aux lexer lexbuf =
@@ -550,3 +565,22 @@ and parse_expr lexer lexbuf =
   in
   parse_assign lexer lexbuf;
   aux lexer lexbuf
+
+let rec parse_stmt lexer lexbuf =
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | ID _, COLON ->
+      next lexer lexbuf;
+      next lexer lexbuf;
+      parse_stmt lexer lexbuf
+  | CASE, _ ->
+      next lexer lexbuf;
+      parse_conditional lexer lexbuf;
+      expect lexer lexbuf COLON;
+      parse_stmt lexer lexbuf
+  | DEFAULT, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf COLON;
+      parse_stmt lexer lexbuf
+  | _ ->
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf SEMI
