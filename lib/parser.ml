@@ -146,7 +146,7 @@ let expect lexer lexbuf token =
   else failwith (Printf.sprintf "%s expected" (show_token token))
 
 let consume lexer lexbuf token =
-  if peek1 lexer lexbuf = token then false
+  if peek1 lexer lexbuf <> token then false
   else (
     next lexer lexbuf;
     true)
@@ -566,8 +566,61 @@ and parse_expr lexer lexbuf =
   parse_assign lexer lexbuf;
   aux lexer lexbuf
 
+let rec parse_init lexer lexbuf =
+  match peek1 lexer lexbuf with
+  | LBRACE ->
+      parse_init_list lexer lexbuf;
+      ignore (consume lexer lexbuf COMMA);
+      expect lexer lexbuf RBRACE
+  | _ -> parse_assign lexer lexbuf
+
+and parse_init_list lexer lexbuf =
+  let rec aux lexer lexbuf =
+    expect lexer lexbuf COMMA;
+    parse_init lexer lexbuf;
+    aux lexer lexbuf
+  in
+  parse_init lexer lexbuf;
+  aux lexer lexbuf
+
+let parse_init_declarator lexer lexbuf =
+  parse_declarator lexer lexbuf;
+  if consume lexer lexbuf EQ then parse_init lexer lexbuf;
+  expect lexer lexbuf SEMI
+
+let parse_declaration lexer lexbuf =
+  parse_declspec lexer lexbuf;
+  parse_init_declarator lexer lexbuf
+
 let rec parse_stmt lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | RETURN, SEMI ->
+      next lexer lexbuf;
+      next lexer lexbuf
+  | BREAK, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf SEMI
+  | CONTINUE, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf SEMI
+  | RETURN, _ ->
+      next lexer lexbuf;
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf SEMI;
+      parse_stmt lexer lexbuf
+  | IF, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf LPAREN;
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf RPAREN;
+      parse_stmt lexer lexbuf;
+      if not (consume lexer lexbuf ELSE) then () else parse_stmt lexer lexbuf
+  | SWITCH, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf LPAREN;
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf RPAREN;
+      parse_stmt lexer lexbuf
   | ID _, COLON ->
       next lexer lexbuf;
       next lexer lexbuf;
@@ -581,6 +634,57 @@ let rec parse_stmt lexer lexbuf =
       next lexer lexbuf;
       expect lexer lexbuf COLON;
       parse_stmt lexer lexbuf
+  | FOR, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf LPAREN;
+      if is_typename (peek1 lexer lexbuf) then (
+        parse_declaration lexer lexbuf;
+        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        expect lexer lexbuf SEMI;
+        if peek1 lexer lexbuf <> RPAREN then parse_expr lexer lexbuf)
+      else (
+        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        expect lexer lexbuf SEMI;
+        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        expect lexer lexbuf SEMI;
+        if peek1 lexer lexbuf <> RPAREN then parse_expr lexer lexbuf);
+      expect lexer lexbuf RPAREN;
+      parse_stmt lexer lexbuf
+  | WHILE, _ ->
+      next lexer lexbuf;
+      expect lexer lexbuf LPAREN;
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf RPAREN;
+      parse_stmt lexer lexbuf
+  | DO, _ ->
+      next lexer lexbuf;
+      parse_stmt lexer lexbuf;
+      expect lexer lexbuf WHILE;
+      expect lexer lexbuf LPAREN;
+      parse_expr lexer lexbuf;
+      expect lexer lexbuf RPAREN;
+      expect lexer lexbuf SEMI
+  | GOTO, ID _ ->
+      next lexer lexbuf;
+      next lexer lexbuf;
+      expect lexer lexbuf SEMI
+  | LBRACE, _ -> parse_compound_stmt lexer lexbuf
   | _ ->
       parse_expr lexer lexbuf;
       expect lexer lexbuf SEMI
+
+and parse_compound_stmt lexer lexbuf =
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | LBRACE, RBRACE ->
+      next lexer lexbuf;
+      expect lexer lexbuf RBRACE
+  | LBRACE, _ ->
+      next lexer lexbuf;
+      parse_stmt lexer lexbuf;
+      expect lexer lexbuf RBRACE
+  | _ -> failwith "expected LBRACE"
+
+let parse_function lexer lexbuf =
+  parse_declspec lexer lexbuf;
+  parse_declarator lexer lexbuf;
+  parse_compound_stmt lexer lexbuf
