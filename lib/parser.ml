@@ -567,8 +567,16 @@ and parse_expr lexer lexbuf =
   aux lexer lexbuf
 
 let rec parse_init lexer lexbuf =
-  match peek1 lexer lexbuf with
-  | LBRACE ->
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | LBRACE, RBRACE ->
+      next lexer lexbuf;
+      next lexer lexbuf
+  | LBRACE, COMMA ->
+      next lexer lexbuf;
+      next lexer lexbuf;
+      expect lexer lexbuf RBRACE
+  | LBRACE, _ ->
+      next lexer lexbuf;
       parse_init_list lexer lexbuf;
       ignore (consume lexer lexbuf COMMA);
       expect lexer lexbuf RBRACE
@@ -576,11 +584,16 @@ let rec parse_init lexer lexbuf =
 
 and parse_init_list lexer lexbuf =
   let rec aux lexer lexbuf =
-    expect lexer lexbuf COMMA;
-    parse_init lexer lexbuf;
-    aux lexer lexbuf
+    if
+      peek1 lexer lexbuf = RBRACE
+      || (peek1 lexer lexbuf = COMMA && peek2 lexer lexbuf = RBRACE)
+    then ()
+    else (
+      expect lexer lexbuf COMMA;
+      parse_init lexer lexbuf;
+      aux lexer lexbuf)
   in
-  parse_init lexer lexbuf;
+  parse_assign lexer lexbuf;
   aux lexer lexbuf
 
 let parse_init_declarator lexer lexbuf =
@@ -669,6 +682,7 @@ let rec parse_stmt lexer lexbuf =
       next lexer lexbuf;
       expect lexer lexbuf SEMI
   | LBRACE, _ -> parse_compound_stmt lexer lexbuf
+  | ty, _ when is_typename ty -> parse_declaration lexer lexbuf
   | _ ->
       parse_expr lexer lexbuf;
       expect lexer lexbuf SEMI
