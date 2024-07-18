@@ -1,3 +1,5 @@
+open Syntax
+
 type token =
   | XOR_EQ
   | WHILE
@@ -263,72 +265,124 @@ and parse_typename lexer lexbuf =
   parse_declspec lexer lexbuf;
   parse_abstract_declarator lexer lexbuf
 
-let parse_primary lexer lexbuf =
+let rec parse_primary lexer lexbuf =
   match peek1 lexer lexbuf with
-  | ID _ -> next lexer lexbuf
-  | INT _ -> next lexer lexbuf
-  | CHAR _ -> next lexer lexbuf
-  | STR _ -> next lexer lexbuf
+  | ID n ->
+      next lexer lexbuf;
+      EVar n
+  | INT i ->
+      next lexer lexbuf;
+      EConst (VInt i)
+  | CHAR c ->
+      next lexer lexbuf;
+      EConst (VChar c)
+  | STR s ->
+      next lexer lexbuf;
+      EConst (VStr s)
+  | LPAREN ->
+      (*next lexer lexbuf;
+      let e = parse_expr lexer lexbuf in
+      expect lexer lexbuf RPAREN;
+      e*)
+      failwith "notimpl"
   | _ ->
       print_endline (show_token (List.hd !lookup_tokens));
       failwith "expected a expression"
 
-let parse_postfix lexer lexbuf =
-  let rec aux lexer lexbuf =
+and parse_postfix lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
-    | LPAREN ->
+    (*| LPAREN ->
         next lexer lexbuf;
+        let rec aux2 lexer lexbuf =
+          match peek1 lexer lexbuf with
+          | COMMA ->
+              next lexer lexbuf;
+              parse_assign lexer lexbuf :: aux2 lexer lexbuf
+          | RPAREN ->
+              next lexer lexbuf;
+              []
+          | _ -> failwith "PCall"
+        in
+        let e =
+          EPostfix
+            ( e,
+              PCall
+                (if consume lexer lexbuf RPAREN then [] else aux2 lexer lexbuf)
+            )
+        in
         next lexer lexbuf;
-        aux lexer lexbuf
+        aux lexer lexbuf e
     | LBRACKET ->
         next lexer lexbuf;
+        let e =
+          EPostfix
+            ( e,
+              PIdx
+                (if consume lexer lexbuf RBRACKET then None
+                 else Some (parse_expr lexer lexbuf)) )
+        in
         next lexer lexbuf;
-        aux lexer lexbuf
+        aux lexer lexbuf e*)
     | DOT ->
         next lexer lexbuf;
+        let id =
+          match peek1 lexer lexbuf with
+          | ID n | TYPE_ID n -> n
+          | _ -> failwith "PDot"
+        in
         next lexer lexbuf;
-        aux lexer lexbuf
+        let e = EPostfix (e, PDot id) in
+        aux lexer lexbuf e
     | ARROW ->
         next lexer lexbuf;
+        let id =
+          match peek1 lexer lexbuf with
+          | ID n | TYPE_ID n -> n
+          | _ -> failwith "PDot"
+        in
         next lexer lexbuf;
-        aux lexer lexbuf
+        let e = EPostfix (e, PArrow id) in
+        aux lexer lexbuf e
     | INC ->
         next lexer lexbuf;
-        aux lexer lexbuf
+        let e = EPostfix (e, PInc) in
+        aux lexer lexbuf e
     | DEC ->
         next lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EPostfix (e, PDec) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_primary lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_primary lexer lexbuf in
+  aux lexer lexbuf e
 
-let rec parse_unary lexer lexbuf =
+and parse_unary lexer lexbuf =
   match peek1 lexer lexbuf with
   | PLUS ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (Plus, parse_cast lexer lexbuf)
   | MINUS ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (Minus, parse_cast lexer lexbuf)
   | AND ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (Ref, parse_cast lexer lexbuf)
   | STAR ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (Deref, parse_cast lexer lexbuf)
   | BANG ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (LogNot, parse_cast lexer lexbuf)
   | NOT ->
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      EUnary (BitNot, parse_cast lexer lexbuf)
   | INC ->
       next lexer lexbuf;
-      parse_unary lexer lexbuf
+      EUnary (Inc, parse_cast lexer lexbuf)
   | DEC ->
       next lexer lexbuf;
-      parse_unary lexer lexbuf
+      EUnary (Dec, parse_cast lexer lexbuf)
   | _ -> parse_postfix lexer lexbuf
 
 and parse_cast lexer lexbuf =
@@ -339,7 +393,7 @@ and parse_cast lexer lexbuf =
       next lexer lexbuf;
       parse_cast lexer lexbuf
   | _ -> parse_unary lexer lexbuf
-
+(*
 let parse_mul lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
@@ -360,7 +414,7 @@ let parse_mul lexer lexbuf =
   parse_cast lexer lexbuf;
   aux lexer lexbuf
 
-let parse_add lexer lexbuf =
+and parse_add lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | PLUS ->
@@ -376,7 +430,7 @@ let parse_add lexer lexbuf =
   parse_mul lexer lexbuf;
   aux lexer lexbuf
 
-let parse_shift lexer lexbuf =
+and parse_shift lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | LSHIFT ->
@@ -392,7 +446,7 @@ let parse_shift lexer lexbuf =
   parse_add lexer lexbuf;
   aux lexer lexbuf
 
-let parse_relational lexer lexbuf =
+and parse_relational lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | LT ->
@@ -416,7 +470,7 @@ let parse_relational lexer lexbuf =
   parse_shift lexer lexbuf;
   aux lexer lexbuf
 
-let parse_equality lexer lexbuf =
+and parse_equality lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | EQEQ ->
@@ -432,7 +486,7 @@ let parse_equality lexer lexbuf =
   parse_relational lexer lexbuf;
   aux lexer lexbuf
 
-let parse_and lexer lexbuf =
+and parse_and lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | AND ->
@@ -444,7 +498,7 @@ let parse_and lexer lexbuf =
   parse_equality lexer lexbuf;
   aux lexer lexbuf
 
-let parse_xor lexer lexbuf =
+and parse_xor lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | HAT ->
@@ -456,7 +510,7 @@ let parse_xor lexer lexbuf =
   parse_and lexer lexbuf;
   aux lexer lexbuf
 
-let parse_or lexer lexbuf =
+and parse_or lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | OR ->
@@ -468,7 +522,7 @@ let parse_or lexer lexbuf =
   parse_xor lexer lexbuf;
   aux lexer lexbuf
 
-let parse_logand lexer lexbuf =
+and parse_logand lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | ANDAND ->
@@ -480,7 +534,7 @@ let parse_logand lexer lexbuf =
   parse_or lexer lexbuf;
   aux lexer lexbuf
 
-let parse_logor lexer lexbuf =
+and parse_logor lexer lexbuf =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | OROR ->
@@ -492,7 +546,7 @@ let parse_logor lexer lexbuf =
   parse_logand lexer lexbuf;
   aux lexer lexbuf
 
-let rec parse_conditional lexer lexbuf =
+and parse_conditional lexer lexbuf =
   parse_logor lexer lexbuf;
   match peek1 lexer lexbuf with
   | QUESTION ->
@@ -702,3 +756,4 @@ let parse_function lexer lexbuf =
   parse_declspec lexer lexbuf;
   parse_declarator lexer lexbuf;
   parse_compound_stmt lexer lexbuf
+*)

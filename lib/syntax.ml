@@ -28,25 +28,25 @@ type binary =
   | Comma
 [@@deriving show]
 
-type unary = Plus | Minus | BitNot | LogNot | Ref | Deref | Sizeof
+type unary = Plus | Minus | BitNot | LogNot | Ref | Deref | Sizeof | Inc | Dec
 [@@deriving show]
 
 and expr =
-  | EConst of ty option * value
-  | EVar of ty option * int
-  | EBinary of ty option * binary * expr * expr
-  | EAssign of ty option * expr * expr
-  | EUnary of ty option * unary * expr
-  | ETyUnary of ty option * unary * ty
-  | EPostfix of ty option * expr * postfix
-  | ECond of ty option * expr * expr * expr
-  | ECast of ty option * ty * expr
-  | ECompoundLit of ty option * ty * init
+  | EConst of value
+  | EVar of string
+  | EBinary of binary * expr * expr
+  | EAssign of expr * expr
+  | EUnary of unary * expr
+  | ETySizeof of ty
+  | EPostfix of expr * postfix
+  | ECond of expr * expr * expr
+  | ECast of ty * expr
+  | ECompoundLit of ty * init
 [@@deriving show]
 
 and postfix =
   | PCall of expr list
-  | PIdx of expr
+  | PIdx of expr option
   | PDot of string
   | PArrow of string
   | PInc
