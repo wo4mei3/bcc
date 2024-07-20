@@ -280,11 +280,10 @@ let rec parse_primary lexer lexbuf =
       next lexer lexbuf;
       EConst (VStr s)
   | LPAREN ->
-      (*next lexer lexbuf;
+      next lexer lexbuf;
       let e = parse_expr lexer lexbuf in
       expect lexer lexbuf RPAREN;
-      e*)
-      failwith "notimpl"
+      e
   | _ ->
       print_endline (show_token (List.hd !lookup_tokens));
       failwith "expected a expression"
@@ -292,24 +291,27 @@ let rec parse_primary lexer lexbuf =
 and parse_postfix lexer lexbuf =
   let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
-    (*| LPAREN ->
+    | LPAREN ->
         next lexer lexbuf;
         let rec aux2 lexer lexbuf =
           match peek1 lexer lexbuf with
           | COMMA ->
               next lexer lexbuf;
-              parse_assign lexer lexbuf :: aux2 lexer lexbuf
+              let e = parse_assign lexer lexbuf in
+              e :: aux2 lexer lexbuf
           | RPAREN ->
               next lexer lexbuf;
               []
-          | _ -> failwith "PCall"
+          | tok -> failwith ("PCall" ^ show_token tok)
         in
         let e =
           EPostfix
             ( e,
               PCall
-                (if consume lexer lexbuf RPAREN then [] else aux2 lexer lexbuf)
-            )
+                (if consume lexer lexbuf RPAREN then []
+                 else
+                   let e = parse_assign lexer lexbuf in
+                   e :: aux2 lexer lexbuf) )
         in
         next lexer lexbuf;
         aux lexer lexbuf e
@@ -323,7 +325,7 @@ and parse_postfix lexer lexbuf =
                  else Some (parse_expr lexer lexbuf)) )
         in
         next lexer lexbuf;
-        aux lexer lexbuf e*)
+        aux lexer lexbuf e
     | DOT ->
         next lexer lexbuf;
         let id =
@@ -393,233 +395,233 @@ and parse_cast lexer lexbuf =
       next lexer lexbuf;
       parse_cast lexer lexbuf
   | _ -> parse_unary lexer lexbuf
-(*
-let parse_mul lexer lexbuf =
-  let rec aux lexer lexbuf =
+
+and parse_mul lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | STAR ->
         next lexer lexbuf;
-        parse_cast lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Mul, e, parse_cast lexer lexbuf) in
+        aux lexer lexbuf e
     | DIV ->
         next lexer lexbuf;
-        parse_cast lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Div, e, parse_cast lexer lexbuf) in
+        aux lexer lexbuf e
     | MOD ->
         next lexer lexbuf;
-        parse_cast lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (Mod, e, parse_cast lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_cast lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_cast lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_add lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | PLUS ->
         next lexer lexbuf;
-        parse_mul lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Add, e, parse_mul lexer lexbuf) in
+        aux lexer lexbuf e
     | MINUS ->
         next lexer lexbuf;
-        parse_mul lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (Sub, e, parse_mul lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_mul lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_mul lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_shift lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | LSHIFT ->
         next lexer lexbuf;
-        parse_add lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (LShift, e, parse_add lexer lexbuf) in
+        aux lexer lexbuf e
     | RSHIFT ->
         next lexer lexbuf;
-        parse_add lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (RShift, e, parse_add lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_add lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_add lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_relational lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | LT ->
         next lexer lexbuf;
-        parse_shift lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Lt, e, parse_shift lexer lexbuf) in
+        aux lexer lexbuf e
     | GT ->
         next lexer lexbuf;
-        parse_shift lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Gt, e, parse_shift lexer lexbuf) in
+        aux lexer lexbuf e
     | LE ->
         next lexer lexbuf;
-        parse_shift lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Le, e, parse_shift lexer lexbuf) in
+        aux lexer lexbuf e
     | GE ->
         next lexer lexbuf;
-        parse_shift lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (Ge, e, parse_shift lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_shift lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_shift lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_equality lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | EQEQ ->
         next lexer lexbuf;
-        parse_relational lexer lexbuf;
-        aux lexer lexbuf
+        let e = EBinary (Eq, e, parse_relational lexer lexbuf) in
+        aux lexer lexbuf e
     | NE ->
         next lexer lexbuf;
-        parse_relational lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (Ne, e, parse_relational lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_relational lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_relational lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_and lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | AND ->
         next lexer lexbuf;
-        parse_equality lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (BitAnd, e, parse_equality lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_equality lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_equality lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_xor lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | HAT ->
         next lexer lexbuf;
-        parse_and lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (BitXor, e, parse_and lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_and lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_and lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_or lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | OR ->
         next lexer lexbuf;
-        parse_xor lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (BitOr, e, parse_xor lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_xor lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_xor lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_logand lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | ANDAND ->
         next lexer lexbuf;
-        parse_or lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (LogAnd, e, parse_or lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_or lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_or lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_logor lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | OROR ->
         next lexer lexbuf;
-        parse_logand lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (LogOr, e, parse_logand lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_logand lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_logand lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_conditional lexer lexbuf =
-  parse_logor lexer lexbuf;
+  let e = parse_logor lexer lexbuf in
   match peek1 lexer lexbuf with
   | QUESTION ->
       next lexer lexbuf;
-      parse_expr lexer lexbuf;
+      let e2 = parse_expr lexer lexbuf in
       expect lexer lexbuf COLON;
-      parse_conditional lexer lexbuf
-  | _ -> ()
+      ECond (e, e2, parse_conditional lexer lexbuf)
+  | _ -> e
 
 and parse_assign lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (None, e, aux lexer lexbuf e')
     | ADD_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some Add, e, aux lexer lexbuf e')
     | SUB_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some Sub, e, aux lexer lexbuf e')
     | MUL_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some Mul, e, aux lexer lexbuf e')
     | DIV_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some Div, e, aux lexer lexbuf e')
     | MOD_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some Mod, e, aux lexer lexbuf e')
     | AND_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some BitAnd, e, aux lexer lexbuf e')
     | OR_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some BitOr, e, aux lexer lexbuf e')
     | XOR_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some BitXor, e, aux lexer lexbuf e')
     | LSHIFT_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some LShift, e, aux lexer lexbuf e')
     | RSHIFT_EQ ->
         next lexer lexbuf;
-        parse_conditional lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e' = parse_conditional lexer lexbuf in
+        EAssign (Some RShift, e, aux lexer lexbuf e')
+    | _ -> e
   in
-  parse_conditional lexer lexbuf;
-  aux lexer lexbuf
+  let e = parse_conditional lexer lexbuf in
+  aux lexer lexbuf e
 
 and parse_expr lexer lexbuf =
-  let rec aux lexer lexbuf =
+  let rec aux lexer lexbuf e =
     match peek1 lexer lexbuf with
     | COMMA ->
         next lexer lexbuf;
-        parse_assign lexer lexbuf;
-        aux lexer lexbuf
-    | _ -> ()
+        let e = EBinary (Comma, e, parse_assign lexer lexbuf) in
+        aux lexer lexbuf e
+    | _ -> e
   in
-  parse_assign lexer lexbuf;
-  aux lexer lexbuf
-
+  let e = parse_assign lexer lexbuf in
+  aux lexer lexbuf e
+(*
 let rec parse_init lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | LBRACE, RBRACE ->

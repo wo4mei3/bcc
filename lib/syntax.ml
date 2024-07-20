@@ -35,7 +35,7 @@ and expr =
   | EConst of value
   | EVar of string
   | EBinary of binary * expr * expr
-  | EAssign of expr * expr
+  | EAssign of binary option * expr * expr
   | EUnary of unary * expr
   | ETySizeof of ty
   | EPostfix of expr * postfix
