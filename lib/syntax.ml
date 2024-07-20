@@ -74,8 +74,8 @@ and stmt =
 and ty =
   | TFun of ty * decl list
   | TPtr of ty
-  | TArr of ty * expr
-  | TDeclSpec of ds list
+  | TArr of ty * expr option
+  | TBase of ds list
 [@@deriving show]
 
 and decl = string * ty [@@deriving show]

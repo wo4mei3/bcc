@@ -104,17 +104,6 @@ type token =
   | ADD_EQ
 [@@deriving show]
 
-(*
-open Env 
-
-type declarator =
-| DeclPtr of declarator * depth * kind * qualifier list
-| DeclIdent of string
-| DeclArr of declarator * expr
-| DeclFun of declarator * expr decl list
-
-*)
-
 let lookup_tokens : token list ref = ref []
 
 let peek1 lexer lexbuf =
@@ -160,112 +149,173 @@ let is_typename = function
       true
   | _ -> false
 
+let tok2ds = function
+  | TVOID -> TsVoid
+  | TBOOL -> TsBool
+  | VA_LIST -> TsVarlist
+  | TYPE_ID n -> TsTypedef n
+  | TCHAR -> TsChar
+  | TSHORT -> TsShort
+  | TINT -> TsInt
+  | TLONG -> TsLong
+  | TFLOAT -> TsFloat
+  | TDOUBLE -> TsDouble
+  | TSIGNED -> TsSigned
+  | TUNSIGNED -> TsUnsigned
+  | TYPEDEF -> ScsTypedef
+  | EXTERN -> ScsExtern
+  | STATIC -> ScsStatic
+  | AUTO -> ScsAuto
+  | REGISTER -> ScsRegister
+  | CONST -> TqConst
+  | VOLATILE -> TqVolatile
+  | INLINE -> FsInline
+  | NORETURN -> FsNoreturn
+  | _ -> failwith "tok2ds"
+
 let rec parse_declspec' lexer lexbuf unique nonunique =
   match peek1 lexer lexbuf with
-  | (TVOID | TBOOL | VA_LIST | TYPE_ID _) when not (unique || nonunique) ->
+  | (TVOID | TBOOL | VA_LIST) as tok when not (unique || nonunique) ->
       next lexer lexbuf;
-      parse_declspec' lexer lexbuf true nonunique
-  | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED)
+      tok2ds tok :: parse_declspec' lexer lexbuf true nonunique
+  | TYPE_ID n when not (unique || nonunique) ->
+      next lexer lexbuf;
+      TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
+  | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED) as
+    tok
     when not unique ->
       next lexer lexbuf;
-      parse_declspec' lexer lexbuf unique true
+      tok2ds tok :: parse_declspec' lexer lexbuf unique true
   | TVOID | TBOOL | VA_LIST | TYPE_ID _ | TCHAR | TSHORT | TINT | TLONG | TFLOAT
   | TDOUBLE | TSIGNED | TUNSIGNED ->
       failwith "expected declarator"
-  | TYPEDEF | EXTERN | STATIC | AUTO | REGISTER | CONST | VOLATILE | INLINE
-  | NORETURN ->
+  | ( TYPEDEF | EXTERN | STATIC | AUTO | REGISTER | CONST | VOLATILE | INLINE
+    | NORETURN ) as tok ->
       next lexer lexbuf;
-      parse_declspec' lexer lexbuf unique nonunique
-  | _ when unique || nonunique -> ()
+      tok2ds tok :: parse_declspec' lexer lexbuf unique nonunique
+  | _ when unique || nonunique -> []
   | _ -> failwith "expected a type specifier"
 
-let parse_declspec lexer lexbuf = parse_declspec' lexer lexbuf false false
+let parse_declspec lexer lexbuf =
+  TBase (parse_declspec' lexer lexbuf false false)
+
+type declarator =
+  | DeclPtr of declarator
+  | DeclIdent of string
+  | DeclArr of declarator * expr option
+  | DeclFun of declarator * decl list
+
+let make_decl ty d =
+  let name = ref "" in
+  let rec aux ty = function
+    | DeclPtr d -> aux (TPtr ty) d
+    | DeclIdent n ->
+        name := n;
+        ty
+    | DeclArr (d, sz) -> aux (TArr (ty, sz)) d
+    | DeclFun (d, dl) -> aux (TFun (ty, dl)) d
+  in
+  (!name, aux ty d)
 
 let rec parse_declarator lexer lexbuf =
   match peek1 lexer lexbuf with
   | STAR ->
       next lexer lexbuf;
-      parse_declarator lexer lexbuf
+      DeclPtr (parse_declarator lexer lexbuf)
   | ID _ | LPAREN -> parse_direct_declarator lexer lexbuf
   | _ -> failwith "expected a declarator"
 
 and parse_direct_declarator lexer lexbuf =
-  (match peek1 lexer lexbuf with
-  | ID _ -> next lexer lexbuf
-  | LPAREN ->
-      next lexer lexbuf;
-      parse_declarator lexer lexbuf;
-      expect lexer lexbuf RPAREN
-  | _ -> failwith "expected a parse_direct_declaratator");
-  parse_type_suffix lexer lexbuf
+  let d =
+    match peek1 lexer lexbuf with
+    | ID n ->
+        next lexer lexbuf;
+        DeclIdent n
+    | LPAREN ->
+        next lexer lexbuf;
+        let d = parse_declarator lexer lexbuf in
+        expect lexer lexbuf RPAREN;
+        d
+    | _ -> failwith "expected a parse_direct_declaratator"
+  in
+  parse_type_suffix lexer lexbuf d
 
 and parse_abstract_declarator lexer lexbuf =
-  match peek1 lexer lexbuf with
-  | STAR ->
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | STAR, (STAR | LPAREN | LBRACKET) ->
       next lexer lexbuf;
-      parse_declarator lexer lexbuf
-  | LPAREN -> parse_abstract_direct_declarator lexer lexbuf
-  | _ -> failwith "expected a declarator"
+      DeclPtr (parse_abstract_declarator lexer lexbuf)
+  | STAR, _ ->
+      next lexer lexbuf;
+      DeclPtr (DeclIdent "")
+  | LPAREN, _ | LBRACKET, _ -> parse_abstract_direct_declarator lexer lexbuf
+  | _ -> DeclIdent ""
 
 and parse_abstract_direct_declarator lexer lexbuf =
-  (match peek1 lexer lexbuf with
-  | LPAREN ->
-      next lexer lexbuf;
-      parse_abstract_declarator lexer lexbuf;
-      expect lexer lexbuf RPAREN
-  | _ -> failwith "expected a parse_direct_declaratator");
-  parse_type_suffix lexer lexbuf
+  let d =
+    match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+    | LPAREN, (STAR | LPAREN | LBRACKET) ->
+        next lexer lexbuf;
+        let d = parse_abstract_declarator lexer lexbuf in
+        expect lexer lexbuf RPAREN;
+        d
+    | LPAREN, _ | LBRACKET, _ -> parse_type_suffix lexer lexbuf (DeclIdent "")
+    | _ -> failwith "expected a abstract direct declaratator"
+  in
+  parse_type_suffix lexer lexbuf d
 
-and parse_type_suffix lexer lexbuf =
+and parse_type_suffix lexer lexbuf d =
   match peek1 lexer lexbuf with
   | LPAREN ->
       next lexer lexbuf;
       if peek1 lexer lexbuf = TVOID && peek2 lexer lexbuf = RPAREN then (
         next lexer lexbuf;
-        next lexer lexbuf)
-      else parse_func_params lexer lexbuf
+        next lexer lexbuf;
+        DeclFun (d, [ ("", TBase [ TsVoid ]) ]))
+      else parse_func_params lexer lexbuf d
   | LBRACKET ->
       next lexer lexbuf;
-      parse_array_dims lexer lexbuf
-  | _ -> ()
+      parse_array_dims lexer lexbuf d
+  | _ -> d
 
-and parse_func_params lexer lexbuf =
+and parse_func_params lexer lexbuf d =
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
     | COMMA ->
         next lexer lexbuf;
-        parse_declspec lexer lexbuf;
-        parse_declarator lexer lexbuf;
-        aux lexer lexbuf
+        let ty = parse_declspec lexer lexbuf in
+        let d = parse_declarator lexer lexbuf in
+        make_decl ty d :: aux lexer lexbuf
     | RPAREN ->
         next lexer lexbuf;
-        parse_type_suffix lexer lexbuf
+        []
     | _ -> failwith "expected a RBRACKET"
   in
   match peek1 lexer lexbuf with
   | RPAREN ->
       next lexer lexbuf;
-      parse_type_suffix lexer lexbuf
+      parse_type_suffix lexer lexbuf (DeclFun (d, []))
   | _ ->
-      parse_declspec lexer lexbuf;
-      parse_declarator lexer lexbuf;
-      aux lexer lexbuf
+      let ty = parse_declspec lexer lexbuf in
+      let d' = parse_declarator lexer lexbuf in
+      DeclFun (d, make_decl ty d' :: aux lexer lexbuf)
 
-and parse_array_dims lexer lexbuf =
+and parse_array_dims lexer lexbuf d =
   match peek1 lexer lexbuf with
-  | INT _ ->
+  | RBRACKET ->
       next lexer lexbuf;
-      expect lexer lexbuf RBRACKET;
-      parse_type_suffix lexer lexbuf
+      parse_type_suffix lexer lexbuf (DeclArr (d, None))
   | _ ->
+      let e = parse_conditional lexer lexbuf in
       expect lexer lexbuf RBRACKET;
-      parse_type_suffix lexer lexbuf
+      parse_type_suffix lexer lexbuf (DeclArr (d, Some e))
 
 and parse_typename lexer lexbuf =
-  parse_declspec lexer lexbuf;
-  parse_abstract_declarator lexer lexbuf
+  let ty = parse_declspec lexer lexbuf in
+  let d = parse_abstract_declarator lexer lexbuf in
+  snd (make_decl ty d)
 
-let rec parse_primary lexer lexbuf =
+and parse_primary lexer lexbuf =
   match peek1 lexer lexbuf with
   | ID n ->
       next lexer lexbuf;
@@ -391,9 +441,9 @@ and parse_cast lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | LPAREN, tok when is_typename tok ->
       next lexer lexbuf;
-      parse_typename lexer lexbuf;
+      let ty = parse_typename lexer lexbuf in
       next lexer lexbuf;
-      parse_cast lexer lexbuf
+      ECast (ty, parse_cast lexer lexbuf)
   | _ -> parse_unary lexer lexbuf
 
 and parse_mul lexer lexbuf =
