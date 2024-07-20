@@ -109,3 +109,6 @@ and ds =
   | FsInline
   | FsNoreturn
 [@@deriving show]
+
+type item = Var of decl * init option | Function of decl * stmt
+[@@deriving show]

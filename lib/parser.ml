@@ -671,46 +671,54 @@ and parse_expr lexer lexbuf =
   in
   let e = parse_assign lexer lexbuf in
   aux lexer lexbuf e
-(*
+
 let rec parse_init lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | LBRACE, RBRACE ->
       next lexer lexbuf;
-      next lexer lexbuf
+      next lexer lexbuf;
+      IVect []
   | LBRACE, COMMA ->
       next lexer lexbuf;
       next lexer lexbuf;
-      expect lexer lexbuf RBRACE
+      expect lexer lexbuf RBRACE;
+      IVect []
   | LBRACE, _ ->
       next lexer lexbuf;
-      parse_init_list lexer lexbuf;
+      let l = parse_init_list lexer lexbuf in
       ignore (consume lexer lexbuf COMMA);
-      expect lexer lexbuf RBRACE
-  | _ -> parse_assign lexer lexbuf
+      expect lexer lexbuf RBRACE;
+      IVect l
+  | _ -> IScal (parse_assign lexer lexbuf)
 
 and parse_init_list lexer lexbuf =
   let rec aux lexer lexbuf =
     if
       peek1 lexer lexbuf = RBRACE
       || (peek1 lexer lexbuf = COMMA && peek2 lexer lexbuf = RBRACE)
-    then ()
+    then []
     else (
       expect lexer lexbuf COMMA;
-      parse_init lexer lexbuf;
-      aux lexer lexbuf)
+      let i = parse_init lexer lexbuf in
+      i :: aux lexer lexbuf)
   in
-  parse_assign lexer lexbuf;
-  aux lexer lexbuf
+  let i = IScal (parse_assign lexer lexbuf) in
+  i :: aux lexer lexbuf
 
 let parse_init_declarator lexer lexbuf =
-  parse_declarator lexer lexbuf;
-  if consume lexer lexbuf EQ then parse_init lexer lexbuf;
-  expect lexer lexbuf SEMI
+  let d = parse_declarator lexer lexbuf in
+  if consume lexer lexbuf EQ then (d, Some (parse_init lexer lexbuf))
+  else (
+    expect lexer lexbuf SEMI;
+    (d, None))
 
 let parse_declaration lexer lexbuf =
-  parse_declspec lexer lexbuf;
-  parse_init_declarator lexer lexbuf
+  let ty = parse_declspec lexer lexbuf in
+  match parse_init_declarator lexer lexbuf with
+  | d, Some init -> Var (make_decl ty d, Some init)
+  | d, None -> Var (make_decl ty d, None)
 
+(*
 let rec parse_stmt lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | RETURN, SEMI ->
