@@ -715,105 +715,126 @@ let parse_init_declarator lexer lexbuf =
 let parse_declaration lexer lexbuf =
   let ty = parse_declspec lexer lexbuf in
   match parse_init_declarator lexer lexbuf with
-  | d, Some init -> Var (make_decl ty d, Some init)
-  | d, None -> Var (make_decl ty d, None)
+  | d, Some init -> (make_decl ty d, Some init)
+  | d, None -> (make_decl ty d, None)
 
-(*
 let rec parse_stmt lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | RETURN, SEMI ->
       next lexer lexbuf;
-      next lexer lexbuf
+      next lexer lexbuf;
+      SReturn None
   | BREAK, _ ->
       next lexer lexbuf;
-      expect lexer lexbuf SEMI
+      expect lexer lexbuf SEMI;
+      SBreak
   | CONTINUE, _ ->
       next lexer lexbuf;
-      expect lexer lexbuf SEMI
+      expect lexer lexbuf SEMI;
+      SContinue
   | RETURN, _ ->
       next lexer lexbuf;
-      parse_expr lexer lexbuf;
+      let e = parse_expr lexer lexbuf in
       expect lexer lexbuf SEMI;
-      parse_stmt lexer lexbuf
+      SReturn (Some e)
   | IF, _ ->
       next lexer lexbuf;
       expect lexer lexbuf LPAREN;
-      parse_expr lexer lexbuf;
+      let e = parse_expr lexer lexbuf in
       expect lexer lexbuf RPAREN;
-      parse_stmt lexer lexbuf;
-      if not (consume lexer lexbuf ELSE) then () else parse_stmt lexer lexbuf
+      let s = parse_stmt lexer lexbuf in
+      if not (consume lexer lexbuf ELSE) then SIfElse (e, s, SExpr None)
+      else SIfElse (e, s, parse_stmt lexer lexbuf)
   | SWITCH, _ ->
       next lexer lexbuf;
       expect lexer lexbuf LPAREN;
-      parse_expr lexer lexbuf;
+      let e = parse_expr lexer lexbuf in
       expect lexer lexbuf RPAREN;
-      parse_stmt lexer lexbuf
-  | ID _, COLON ->
-      next lexer lexbuf;
-      next lexer lexbuf;
-      parse_stmt lexer lexbuf
+      SSwitch (e, parse_stmt lexer lexbuf)
   | CASE, _ ->
       next lexer lexbuf;
-      parse_conditional lexer lexbuf;
+      let e = parse_conditional lexer lexbuf in
       expect lexer lexbuf COLON;
-      parse_stmt lexer lexbuf
+      SCase e
   | DEFAULT, _ ->
       next lexer lexbuf;
       expect lexer lexbuf COLON;
-      parse_stmt lexer lexbuf
+      SDefault
   | FOR, _ ->
       next lexer lexbuf;
       expect lexer lexbuf LPAREN;
       if is_typename (peek1 lexer lexbuf) then (
-        parse_declaration lexer lexbuf;
-        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        let decl, init = parse_declaration lexer lexbuf in
+        let e2 =
+          if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
+          else None
+        in
         expect lexer lexbuf SEMI;
-        if peek1 lexer lexbuf <> RPAREN then parse_expr lexer lexbuf)
-      else (
-        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        let e3 =
+          if peek1 lexer lexbuf <> RPAREN then Some (parse_expr lexer lexbuf)
+          else None
+        in
+        expect lexer lexbuf RPAREN;
+        SFor1 ((decl, init), e2, e3, parse_stmt lexer lexbuf))
+      else
+        let e1 =
+          if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
+          else None
+        in
         expect lexer lexbuf SEMI;
-        if peek1 lexer lexbuf <> SEMI then parse_expr lexer lexbuf;
+        let e2 =
+          if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
+          else None
+        in
         expect lexer lexbuf SEMI;
-        if peek1 lexer lexbuf <> RPAREN then parse_expr lexer lexbuf);
-      expect lexer lexbuf RPAREN;
-      parse_stmt lexer lexbuf
+        let e3 =
+          if peek1 lexer lexbuf <> RPAREN then Some (parse_expr lexer lexbuf)
+          else None
+        in
+        SFor2 (e1, e2, e3, parse_stmt lexer lexbuf)
   | WHILE, _ ->
       next lexer lexbuf;
       expect lexer lexbuf LPAREN;
-      parse_expr lexer lexbuf;
+      let e = parse_expr lexer lexbuf in
       expect lexer lexbuf RPAREN;
-      parse_stmt lexer lexbuf
+      SWhile (e, parse_stmt lexer lexbuf)
   | DO, _ ->
       next lexer lexbuf;
-      parse_stmt lexer lexbuf;
+      let s = parse_stmt lexer lexbuf in
       expect lexer lexbuf WHILE;
       expect lexer lexbuf LPAREN;
-      parse_expr lexer lexbuf;
+      let s = SDoWhile (s, parse_expr lexer lexbuf) in
       expect lexer lexbuf RPAREN;
-      expect lexer lexbuf SEMI
-  | GOTO, ID _ ->
-      next lexer lexbuf;
-      next lexer lexbuf;
-      expect lexer lexbuf SEMI
+      expect lexer lexbuf SEMI;
+      s
   | LBRACE, _ -> parse_compound_stmt lexer lexbuf
-  | ty, _ when is_typename ty -> parse_declaration lexer lexbuf
+  | ty, _ when is_typename ty ->
+      let decl, init = parse_declaration lexer lexbuf in
+      SDecl (decl, init)
   | _ ->
-      parse_expr lexer lexbuf;
-      expect lexer lexbuf SEMI
+      let e = parse_expr lexer lexbuf in
+      expect lexer lexbuf SEMI;
+      SExpr (Some e)
 
 and parse_compound_stmt lexer lexbuf =
-  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
-  | LBRACE, RBRACE ->
-      next lexer lexbuf;
-      expect lexer lexbuf RBRACE
-  | LBRACE, _ ->
-      next lexer lexbuf;
-      parse_stmt lexer lexbuf;
-      expect lexer lexbuf RBRACE
-  | _ -> failwith "expected LBRACE"
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | RBRACE ->
+        next lexer lexbuf;
+        []
+    | _ ->
+        next lexer lexbuf;
+        let s = parse_stmt lexer lexbuf in
+        s :: aux lexer lexbuf
+  in
+  expect lexer lexbuf LBRACE;
+  SStmts (aux lexer lexbuf)
 
-let parse_function lexer lexbuf =
-  parse_declspec lexer lexbuf;
-  parse_declarator lexer lexbuf;
-  parse_compound_stmt lexer lexbuf
-*)
+let parse_item lexer lexbuf =
+  let ty = parse_declspec lexer lexbuf in
+  let d = parse_declarator lexer lexbuf in
+  if consume lexer lexbuf EQ then
+    let i = parse_init lexer lexbuf in
+    Var (make_decl ty d, Some i)
+  else if consume lexer lexbuf SEMI then Var (make_decl ty d, None)
+  else Function (make_decl ty d, parse_compound_stmt lexer lexbuf)
