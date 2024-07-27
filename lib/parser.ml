@@ -1,3 +1,4 @@
+open Env
 open Syntax
 
 type token =
@@ -317,9 +318,11 @@ and parse_typename lexer lexbuf =
 
 and parse_primary lexer lexbuf =
   match peek1 lexer lexbuf with
-  | ID n ->
+  | ID n -> (
       next lexer lexbuf;
-      EVar n
+      match find_var n with
+      | Some _ -> EVar n
+      | None -> failwith ("var not find: " ^ n))
   | INT i ->
       next lexer lexbuf;
       EConst (VInt i)
@@ -810,6 +813,7 @@ let rec parse_stmt lexer lexbuf =
   | LBRACE, _ -> parse_compound_stmt lexer lexbuf
   | ty, _ when is_typename ty ->
       let decl, init = parse_declaration lexer lexbuf in
+      add_var decl;
       SDecl (decl, init)
   | _ ->
       let e = parse_expr lexer lexbuf in
@@ -821,14 +825,16 @@ and parse_compound_stmt lexer lexbuf =
     match peek1 lexer lexbuf with
     | RBRACE ->
         next lexer lexbuf;
+        push ();
         []
     | _ ->
-        next lexer lexbuf;
         let s = parse_stmt lexer lexbuf in
         s :: aux lexer lexbuf
   in
   expect lexer lexbuf LBRACE;
-  SStmts (aux lexer lexbuf)
+  let stmts = aux lexer lexbuf in
+  pop ();
+  SStmts stmts
 
 let parse_item lexer lexbuf =
   let ty = parse_declspec lexer lexbuf in

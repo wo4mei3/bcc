@@ -1,4 +1,5 @@
 {
+open Env
 open Parser
 
 exception LexerError of string
@@ -141,7 +142,10 @@ rule token = parse
 | "__builtin_va_arg"            { VA_ARG }
 | "__builtin_va_end"            { VA_END }
 | "__builtin_va_list"           { VA_LIST }
-| ident  as n                   { ID n }
+| ident  as n                   { match find_typedef n with
+                                  | Some _ -> TYPE_ID n
+                                  | None -> ID n 
+                                }
 | eof   { EOF }
 | _     { raise (LexerError ("illegal token '%s'" ^ Lexing.lexeme lexbuf)) }
 
