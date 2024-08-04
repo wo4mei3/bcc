@@ -32,14 +32,14 @@ type unary = Plus | Minus | BitNot | LogNot | Ref | Deref | Sizeof | Inc | Dec
 [@@deriving show]
 
 and expr =
-  | EConst of value
-  | EVar of string
-  | EBinary of binary * expr * expr
-  | EAssign of binary option * expr * expr
-  | EUnary of unary * expr
+  | EConst of ty * value
+  | EVar of ty * string
+  | EBinary of ty * binary * expr * expr
+  | EAssign of ty * binary option * expr * expr
+  | EUnary of ty * unary * expr
   | ETySizeof of ty
-  | EPostfix of expr * postfix
-  | ECond of expr * expr * expr
+  | EPostfix of ty * expr * postfix
+  | ECond of ty * expr * expr * expr
   | ECast of ty * expr
   | ECompoundLit of ty * init
 [@@deriving show]

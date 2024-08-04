@@ -1,5 +1,6 @@
 open Env
 open Syntax
+open Type
 
 type token =
   | XOR_EQ
@@ -321,17 +322,20 @@ and parse_primary lexer lexbuf =
   | ID n -> (
       next lexer lexbuf;
       match find_var n with
-      | Some _ -> EVar n
+      | Some ty -> EVar (ty, n)
       | None -> failwith ("var not find: " ^ n))
   | INT i ->
       next lexer lexbuf;
-      EConst (VInt i)
+      EConst (TBase [ TsInt ], VInt i)
   | CHAR c ->
       next lexer lexbuf;
-      EConst (VChar c)
+      EConst (TBase [ TsChar ], VChar c)
+  | FLOAT f ->
+      next lexer lexbuf;
+      EConst (TBase [ TsFloat ], VFloat f)
   | STR s ->
       next lexer lexbuf;
-      EConst (VStr s)
+      EConst (TPtr (TBase [ TsChar ]), VStr s)
   | LPAREN ->
       next lexer lexbuf;
       let e = parse_expr lexer lexbuf in
@@ -359,7 +363,8 @@ and parse_postfix lexer lexbuf =
         in
         let e =
           EPostfix
-            ( e,
+            ( get_retty (expr_ty e),
+              e,
               PCall
                 (if consume lexer lexbuf RPAREN then []
                  else
@@ -372,7 +377,8 @@ and parse_postfix lexer lexbuf =
         next lexer lexbuf;
         let e =
           EPostfix
-            ( e,
+            ( get_basety (expr_ty e),
+              e,
               PIdx
                 (if consume lexer lexbuf RBRACKET then None
                  else Some (parse_expr lexer lexbuf)) )
@@ -387,7 +393,11 @@ and parse_postfix lexer lexbuf =
           | _ -> failwith "PDot"
         in
         next lexer lexbuf;
-        let e = EPostfix (e, PDot id) in
+        let ty =
+          try List.assoc id (get_members (expr_ty e))
+          with _ -> failwith ("no member found: " ^ id)
+        in
+        let e = EPostfix (ty, e, PDot id) in
         aux lexer lexbuf e
     | ARROW ->
         next lexer lexbuf;
@@ -397,15 +407,19 @@ and parse_postfix lexer lexbuf =
           | _ -> failwith "PDot"
         in
         next lexer lexbuf;
-        let e = EPostfix (e, PArrow id) in
+        let ty =
+          try List.assoc id (get_members (get_basety (expr_ty e)))
+          with _ -> failwith ("no member found: " ^ id)
+        in
+        let e = EPostfix (ty, e, PArrow id) in
         aux lexer lexbuf e
     | INC ->
         next lexer lexbuf;
-        let e = EPostfix (e, PInc) in
+        let e = EPostfix (expr_ty e, e, PInc) in
         aux lexer lexbuf e
     | DEC ->
         next lexer lexbuf;
-        let e = EPostfix (e, PDec) in
+        let e = EPostfix (expr_ty e, e, PDec) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -416,28 +430,44 @@ and parse_unary lexer lexbuf =
   match peek1 lexer lexbuf with
   | PLUS ->
       next lexer lexbuf;
-      EUnary (Plus, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, Plus, e)
   | MINUS ->
       next lexer lexbuf;
-      EUnary (Minus, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, Minus, e)
   | AND ->
       next lexer lexbuf;
-      EUnary (Ref, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (TPtr ty, Ref, e)
   | STAR ->
       next lexer lexbuf;
-      EUnary (Deref, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (get_basety ty, Deref, e)
   | BANG ->
       next lexer lexbuf;
-      EUnary (LogNot, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, LogNot, e)
   | NOT ->
       next lexer lexbuf;
-      EUnary (BitNot, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, BitNot, e)
   | INC ->
       next lexer lexbuf;
-      EUnary (Inc, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, Inc, e)
   | DEC ->
       next lexer lexbuf;
-      EUnary (Dec, parse_cast lexer lexbuf)
+      let e = parse_cast lexer lexbuf in
+      let ty = expr_ty e in
+      EUnary (ty, Dec, e)
   | _ -> parse_postfix lexer lexbuf
 
 and parse_cast lexer lexbuf =
@@ -454,15 +484,15 @@ and parse_mul lexer lexbuf =
     match peek1 lexer lexbuf with
     | STAR ->
         next lexer lexbuf;
-        let e = EBinary (Mul, e, parse_cast lexer lexbuf) in
+        let e = EBinary (expr_ty e, Mul, e, parse_cast lexer lexbuf) in
         aux lexer lexbuf e
     | DIV ->
         next lexer lexbuf;
-        let e = EBinary (Div, e, parse_cast lexer lexbuf) in
+        let e = EBinary (expr_ty e, Div, e, parse_cast lexer lexbuf) in
         aux lexer lexbuf e
     | MOD ->
         next lexer lexbuf;
-        let e = EBinary (Mod, e, parse_cast lexer lexbuf) in
+        let e = EBinary (expr_ty e, Mod, e, parse_cast lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -474,11 +504,11 @@ and parse_add lexer lexbuf =
     match peek1 lexer lexbuf with
     | PLUS ->
         next lexer lexbuf;
-        let e = EBinary (Add, e, parse_mul lexer lexbuf) in
+        let e = EBinary (expr_ty e, Add, e, parse_mul lexer lexbuf) in
         aux lexer lexbuf e
     | MINUS ->
         next lexer lexbuf;
-        let e = EBinary (Sub, e, parse_mul lexer lexbuf) in
+        let e = EBinary (expr_ty e, Sub, e, parse_mul lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -490,11 +520,11 @@ and parse_shift lexer lexbuf =
     match peek1 lexer lexbuf with
     | LSHIFT ->
         next lexer lexbuf;
-        let e = EBinary (LShift, e, parse_add lexer lexbuf) in
+        let e = EBinary (expr_ty e, LShift, e, parse_add lexer lexbuf) in
         aux lexer lexbuf e
     | RSHIFT ->
         next lexer lexbuf;
-        let e = EBinary (RShift, e, parse_add lexer lexbuf) in
+        let e = EBinary (expr_ty e, RShift, e, parse_add lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -506,19 +536,19 @@ and parse_relational lexer lexbuf =
     match peek1 lexer lexbuf with
     | LT ->
         next lexer lexbuf;
-        let e = EBinary (Lt, e, parse_shift lexer lexbuf) in
+        let e = EBinary (expr_ty e, Lt, e, parse_shift lexer lexbuf) in
         aux lexer lexbuf e
     | GT ->
         next lexer lexbuf;
-        let e = EBinary (Gt, e, parse_shift lexer lexbuf) in
+        let e = EBinary (expr_ty e, Gt, e, parse_shift lexer lexbuf) in
         aux lexer lexbuf e
     | LE ->
         next lexer lexbuf;
-        let e = EBinary (Le, e, parse_shift lexer lexbuf) in
+        let e = EBinary (expr_ty e, Le, e, parse_shift lexer lexbuf) in
         aux lexer lexbuf e
     | GE ->
         next lexer lexbuf;
-        let e = EBinary (Ge, e, parse_shift lexer lexbuf) in
+        let e = EBinary (expr_ty e, Ge, e, parse_shift lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -530,11 +560,11 @@ and parse_equality lexer lexbuf =
     match peek1 lexer lexbuf with
     | EQEQ ->
         next lexer lexbuf;
-        let e = EBinary (Eq, e, parse_relational lexer lexbuf) in
+        let e = EBinary (expr_ty e, Eq, e, parse_relational lexer lexbuf) in
         aux lexer lexbuf e
     | NE ->
         next lexer lexbuf;
-        let e = EBinary (Ne, e, parse_relational lexer lexbuf) in
+        let e = EBinary (expr_ty e, Ne, e, parse_relational lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -546,7 +576,7 @@ and parse_and lexer lexbuf =
     match peek1 lexer lexbuf with
     | AND ->
         next lexer lexbuf;
-        let e = EBinary (BitAnd, e, parse_equality lexer lexbuf) in
+        let e = EBinary (expr_ty e, BitAnd, e, parse_equality lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -558,7 +588,7 @@ and parse_xor lexer lexbuf =
     match peek1 lexer lexbuf with
     | HAT ->
         next lexer lexbuf;
-        let e = EBinary (BitXor, e, parse_and lexer lexbuf) in
+        let e = EBinary (expr_ty e, BitXor, e, parse_and lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -570,7 +600,7 @@ and parse_or lexer lexbuf =
     match peek1 lexer lexbuf with
     | OR ->
         next lexer lexbuf;
-        let e = EBinary (BitOr, e, parse_xor lexer lexbuf) in
+        let e = EBinary (expr_ty e, BitOr, e, parse_xor lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -582,7 +612,7 @@ and parse_logand lexer lexbuf =
     match peek1 lexer lexbuf with
     | ANDAND ->
         next lexer lexbuf;
-        let e = EBinary (LogAnd, e, parse_or lexer lexbuf) in
+        let e = EBinary (expr_ty e, LogAnd, e, parse_or lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -594,7 +624,7 @@ and parse_logor lexer lexbuf =
     match peek1 lexer lexbuf with
     | OROR ->
         next lexer lexbuf;
-        let e = EBinary (LogOr, e, parse_logand lexer lexbuf) in
+        let e = EBinary (expr_ty e, LogOr, e, parse_logand lexer lexbuf) in
         aux lexer lexbuf e
     | _ -> e
   in
@@ -608,7 +638,7 @@ and parse_conditional lexer lexbuf =
       next lexer lexbuf;
       let e2 = parse_expr lexer lexbuf in
       expect lexer lexbuf COLON;
-      ECond (e, e2, parse_conditional lexer lexbuf)
+      ECond (expr_ty e2, e, e2, parse_conditional lexer lexbuf)
   | _ -> e
 
 and parse_assign lexer lexbuf =
@@ -617,47 +647,47 @@ and parse_assign lexer lexbuf =
     | EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (None, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', None, e, aux lexer lexbuf e')
     | ADD_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some Add, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some Add, e, aux lexer lexbuf e')
     | SUB_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some Sub, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some Sub, e, aux lexer lexbuf e')
     | MUL_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some Mul, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some Mul, e, aux lexer lexbuf e')
     | DIV_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some Div, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some Div, e, aux lexer lexbuf e')
     | MOD_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some Mod, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some Mod, e, aux lexer lexbuf e')
     | AND_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some BitAnd, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some BitAnd, e, aux lexer lexbuf e')
     | OR_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some BitOr, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some BitOr, e, aux lexer lexbuf e')
     | XOR_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some BitXor, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some BitXor, e, aux lexer lexbuf e')
     | LSHIFT_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some LShift, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some LShift, e, aux lexer lexbuf e')
     | RSHIFT_EQ ->
         next lexer lexbuf;
         let e' = parse_conditional lexer lexbuf in
-        EAssign (Some RShift, e, aux lexer lexbuf e')
+        EAssign (expr_ty e', Some RShift, e, aux lexer lexbuf e')
     | _ -> e
   in
   let e = parse_conditional lexer lexbuf in
@@ -668,7 +698,8 @@ and parse_expr lexer lexbuf =
     match peek1 lexer lexbuf with
     | COMMA ->
         next lexer lexbuf;
-        let e = EBinary (Comma, e, parse_assign lexer lexbuf) in
+        let e' = parse_assign lexer lexbuf in
+        let e = EBinary (expr_ty e', Comma, e, e') in
         aux lexer lexbuf e
     | _ -> e
   in
