@@ -147,7 +147,7 @@ let consume lexer lexbuf token =
 let is_typename = function
   | TVOID | TBOOL | VA_LIST | TYPE_ID _ | TCHAR | TSHORT | TINT | TLONG | TFLOAT
   | TDOUBLE | TSIGNED | TUNSIGNED | TYPEDEF | EXTERN | STATIC | AUTO | REGISTER
-  | CONST | VOLATILE | INLINE | NORETURN ->
+  | CONST | VOLATILE | INLINE | NORETURN | STRUCT | UNION | ENUM ->
       true
   | _ -> false
 
@@ -175,32 +175,6 @@ let tok2ds = function
   | NORETURN -> FsNoreturn
   | _ -> failwith "tok2ds"
 
-let rec parse_declspec' lexer lexbuf unique nonunique =
-  match peek1 lexer lexbuf with
-  | (TVOID | TBOOL | VA_LIST) as tok when not (unique || nonunique) ->
-      next lexer lexbuf;
-      tok2ds tok :: parse_declspec' lexer lexbuf true nonunique
-  | TYPE_ID n when not (unique || nonunique) ->
-      next lexer lexbuf;
-      TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
-  | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED) as
-    tok
-    when not unique ->
-      next lexer lexbuf;
-      tok2ds tok :: parse_declspec' lexer lexbuf unique true
-  | TVOID | TBOOL | VA_LIST | TYPE_ID _ | TCHAR | TSHORT | TINT | TLONG | TFLOAT
-  | TDOUBLE | TSIGNED | TUNSIGNED ->
-      failwith "expected declarator"
-  | ( TYPEDEF | EXTERN | STATIC | AUTO | REGISTER | CONST | VOLATILE | INLINE
-    | NORETURN ) as tok ->
-      next lexer lexbuf;
-      tok2ds tok :: parse_declspec' lexer lexbuf unique nonunique
-  | _ when unique || nonunique -> []
-  | _ -> failwith "expected a type specifier"
-
-let parse_declspec lexer lexbuf =
-  TBase (parse_declspec' lexer lexbuf false false)
-
 type declarator =
   | DeclPtr of declarator
   | DeclIdent of string
@@ -219,7 +193,58 @@ let make_decl ty d =
   in
   (!name, aux ty d)
 
-let rec parse_declarator lexer lexbuf =
+let rec parse_declspec' lexer lexbuf unique nonunique =
+  match peek1 lexer lexbuf with
+  | (TVOID | TBOOL | VA_LIST) as tok when not (unique || nonunique) ->
+      next lexer lexbuf;
+      tok2ds tok :: parse_declspec' lexer lexbuf true nonunique
+  | STRUCT when not (unique || nonunique) ->
+      parse_struct lexer lexbuf :: parse_declspec' lexer lexbuf true nonunique
+  | TYPE_ID n when not (unique || nonunique) ->
+      next lexer lexbuf;
+      TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
+  | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED) as
+    tok
+    when not unique ->
+      next lexer lexbuf;
+      tok2ds tok :: parse_declspec' lexer lexbuf unique true
+  | ( TYPEDEF | EXTERN | STATIC | AUTO | REGISTER | CONST | VOLATILE | INLINE
+    | NORETURN ) as tok ->
+      next lexer lexbuf;
+      tok2ds tok :: parse_declspec' lexer lexbuf unique nonunique
+  | _ when unique || nonunique -> []
+  | _ -> failwith "expected a type specifier"
+
+and parse_declspec lexer lexbuf =
+  TBase (parse_declspec' lexer lexbuf false false)
+
+and parse_fields lexer lexbuf =
+  match peek1 lexer lexbuf with
+  | RBRACE -> []
+  | _ ->
+      let fields = List.map fst (parse_declaration lexer lexbuf) in
+      fields @ parse_fields lexer lexbuf
+
+and parse_struct lexer lexbuf =
+  expect lexer lexbuf STRUCT;
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | ID _, LBRACE ->
+      next lexer lexbuf;
+      next lexer lexbuf;
+      let ts = TsStructDef (parse_fields lexer lexbuf) in
+      expect lexer lexbuf RBRACE;
+      ts
+  | LBRACE, _ ->
+      next lexer lexbuf;
+      let ts = TsStructDef (parse_fields lexer lexbuf) in
+      expect lexer lexbuf RBRACE;
+      ts
+  | ID _, _ ->
+      next lexer lexbuf;
+      TsStruct
+  | _ -> failwith "expected a identifier or a lbrace"
+
+and parse_declarator lexer lexbuf =
   match peek1 lexer lexbuf with
   | STAR ->
       next lexer lexbuf;
@@ -706,7 +731,7 @@ and parse_expr lexer lexbuf =
   let e = parse_assign lexer lexbuf in
   aux lexer lexbuf e
 
-let rec parse_init lexer lexbuf =
+and parse_init lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
   | LBRACE, RBRACE ->
       next lexer lexbuf;
@@ -739,18 +764,39 @@ and parse_init_list lexer lexbuf =
   let i = IScal (parse_assign lexer lexbuf) in
   i :: aux lexer lexbuf
 
-let parse_init_declarator lexer lexbuf =
+and parse_init_declarator lexer lexbuf =
   let d = parse_declarator lexer lexbuf in
   if consume lexer lexbuf EQ then (d, Some (parse_init lexer lexbuf))
-  else (
-    expect lexer lexbuf SEMI;
-    (d, None))
+  else (d, None)
 
-let parse_declaration lexer lexbuf =
+and parse_declaration lexer lexbuf =
   let ty = parse_declspec lexer lexbuf in
-  match parse_init_declarator lexer lexbuf with
-  | d, Some init -> (make_decl ty d, Some init)
-  | d, None -> (make_decl ty d, None)
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | SEMI ->
+        next lexer lexbuf;
+        []
+    | COMMA ->
+        next lexer lexbuf;
+        let ret =
+          match parse_init_declarator lexer lexbuf with
+          | d, Some init -> (make_decl ty d, Some init)
+          | d, None -> (make_decl ty d, None)
+        in
+        ret :: aux lexer lexbuf
+    | _ -> failwith "expected a SEMI"
+  in
+  match peek1 lexer lexbuf with
+  | SEMI ->
+      next lexer lexbuf;
+      []
+  | _ ->
+      let ret =
+        match parse_init_declarator lexer lexbuf with
+        | d, Some init -> (make_decl ty d, Some init)
+        | d, None -> (make_decl ty d, None)
+      in
+      ret :: aux lexer lexbuf
 
 let rec parse_stmt lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
@@ -798,7 +844,7 @@ let rec parse_stmt lexer lexbuf =
       next lexer lexbuf;
       expect lexer lexbuf LPAREN;
       if is_typename (peek1 lexer lexbuf) then (
-        let decl, init = parse_declaration lexer lexbuf in
+        let decls = parse_declaration lexer lexbuf in
         let e2 =
           if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
           else None
@@ -809,7 +855,7 @@ let rec parse_stmt lexer lexbuf =
           else None
         in
         expect lexer lexbuf RPAREN;
-        SFor1 ((decl, init), e2, e3, parse_stmt lexer lexbuf))
+        SFor1 (decls, e2, e3, parse_stmt lexer lexbuf))
       else
         let e1 =
           if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
@@ -843,9 +889,9 @@ let rec parse_stmt lexer lexbuf =
       s
   | LBRACE, _ -> parse_compound_stmt lexer lexbuf
   | ty, _ when is_typename ty ->
-      let decl, init = parse_declaration lexer lexbuf in
-      add_var decl;
-      SDecl (decl, init)
+      let decls = parse_declaration lexer lexbuf in
+      List.iter add_var (List.map fst decls);
+      SDecl decls
   | _ ->
       let e = parse_expr lexer lexbuf in
       expect lexer lexbuf SEMI;

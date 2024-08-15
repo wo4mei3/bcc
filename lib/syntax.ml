@@ -56,11 +56,11 @@ and postfix =
 and init = IScal of expr | IVect of init list [@@deriving show]
 
 and stmt =
-  | SDecl of decl * init option
+  | SDecl of (decl * init option) list
   | SStmts of stmt list
   | SWhile of expr * stmt
   | SDoWhile of stmt * expr
-  | SFor1 of (decl * init option) * expr option * expr option * stmt
+  | SFor1 of (decl * init option) list * expr option * expr option * stmt
   | SFor2 of expr option * expr option * expr option * stmt
   | SIfElse of expr * stmt * stmt
   | SReturn of expr option
