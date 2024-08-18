@@ -13,7 +13,7 @@ let () =
     Bcc.Parser.next Bcc.Lexer.token lexbuf;*)
   let lexbuf =
     Lexing.from_string
-      "int main () { int int; struct X; struct X{int a; int b;} a; a.a;}"
+      "int main () { int int; struct X a; struct X{int a; int b;};  a.a;}"
   in
   let item = Bcc.Parser.parse_item Bcc.Lexer.token lexbuf in
   print_endline (Bcc.Syntax.show_item item)

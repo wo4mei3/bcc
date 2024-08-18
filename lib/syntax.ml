@@ -95,11 +95,11 @@ and ds =
   | TsFloat
   | TsDouble
   | TsVoid
-  | TsStruct
-  | TsUnion
+  | TsStruct of string
+  | TsUnion of string
   | TsEnum
-  | TsStructDef of (string * ty) list
-  | TsUnionDef of (string * ty) list
+  | TsStructDef of string * (string * ty) list
+  | TsUnionDef of string * (string * ty) list
   | TsEnumDef of (string * int option) list
   | TsTypedef of string
   | ScsTypedef

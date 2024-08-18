@@ -40,12 +40,17 @@ let get_basety ty =
   | _ -> failwith "not a pointer type"
 
 let get_members ty =
-  let pred = function TsStructDef _ | TsUnionDef _ -> true | _ -> false in
+  let pred = function
+    | TsStruct _ | TsUnion _ | TsStructDef _ | TsUnionDef _ -> true
+    | _ -> false
+  in
   match get_originty ty with
   | TBase base -> (
       match
         try List.find pred base with _ -> failwith "not a compound type"
       with
-      | TsStructDef mem | TsUnionDef mem -> mem
+      | TsStructDef (_, mem) | TsUnionDef (_, mem) -> mem
+      | TsStruct n -> Option.get (find_struct n)
+      | TsUnion n -> Option.get (find_union n)
       | _ -> failwith "not a compound type")
   | _ -> failwith "not a compound type"

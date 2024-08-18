@@ -200,6 +200,8 @@ let rec parse_declspec' lexer lexbuf unique nonunique =
       tok2ds tok :: parse_declspec' lexer lexbuf true nonunique
   | STRUCT when not (unique || nonunique) ->
       parse_struct lexer lexbuf :: parse_declspec' lexer lexbuf true nonunique
+  | UNION when not (unique || nonunique) ->
+      parse_union lexer lexbuf :: parse_declspec' lexer lexbuf true nonunique
   | TYPE_ID n when not (unique || nonunique) ->
       next lexer lexbuf;
       TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
@@ -228,20 +230,43 @@ and parse_fields lexer lexbuf =
 and parse_struct lexer lexbuf =
   expect lexer lexbuf STRUCT;
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
-  | ID _, LBRACE ->
+  | ID n, LBRACE ->
       next lexer lexbuf;
       next lexer lexbuf;
-      let ts = TsStructDef (parse_fields lexer lexbuf) in
+      let fields = parse_fields lexer lexbuf in
+      let ts = TsStructDef (n, fields) in
+      add_struct (n, fields);
       expect lexer lexbuf RBRACE;
       ts
   | LBRACE, _ ->
       next lexer lexbuf;
-      let ts = TsStructDef (parse_fields lexer lexbuf) in
+      let ts = TsStructDef ("", parse_fields lexer lexbuf) in
       expect lexer lexbuf RBRACE;
       ts
-  | ID _, _ ->
+  | ID n, _ ->
       next lexer lexbuf;
-      TsStruct
+      TsStruct n
+  | _ -> failwith "expected a identifier or a lbrace"
+
+and parse_union lexer lexbuf =
+  expect lexer lexbuf STRUCT;
+  match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+  | ID n, LBRACE ->
+      next lexer lexbuf;
+      next lexer lexbuf;
+      let fields = parse_fields lexer lexbuf in
+      let ts = TsUnionDef (n, fields) in
+      add_union (n, fields);
+      expect lexer lexbuf RBRACE;
+      ts
+  | LBRACE, _ ->
+      next lexer lexbuf;
+      let ts = TsUnionDef ("", parse_fields lexer lexbuf) in
+      expect lexer lexbuf RBRACE;
+      ts
+  | ID n, _ ->
+      next lexer lexbuf;
+      TsStruct n
   | _ -> failwith "expected a identifier or a lbrace"
 
 and parse_declarator lexer lexbuf =
@@ -845,6 +870,8 @@ let rec parse_stmt lexer lexbuf =
       expect lexer lexbuf LPAREN;
       if is_typename (peek1 lexer lexbuf) then (
         let decls = parse_declaration lexer lexbuf in
+        push ();
+        List.iter add_var (List.map fst decls);
         let e2 =
           if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
           else None
@@ -855,7 +882,11 @@ let rec parse_stmt lexer lexbuf =
           else None
         in
         expect lexer lexbuf RPAREN;
-        SFor1 (decls, e2, e3, parse_stmt lexer lexbuf))
+        let ret =
+          SFor1 (decls, e2, e3, parse_compound_stmt_with_no_action lexer lexbuf)
+        in
+        pop ();
+        ret)
       else
         let e1 =
           if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
@@ -902,7 +933,23 @@ and parse_compound_stmt lexer lexbuf =
     match peek1 lexer lexbuf with
     | RBRACE ->
         next lexer lexbuf;
-        push ();
+
+        []
+    | _ ->
+        let s = parse_stmt lexer lexbuf in
+        s :: aux lexer lexbuf
+  in
+  expect lexer lexbuf LBRACE;
+  push ();
+  let stmts = aux lexer lexbuf in
+  pop ();
+  SStmts stmts
+
+and parse_compound_stmt_with_no_action lexer lexbuf =
+  let rec aux lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | RBRACE ->
+        next lexer lexbuf;
         []
     | _ ->
         let s = parse_stmt lexer lexbuf in
@@ -910,7 +957,6 @@ and parse_compound_stmt lexer lexbuf =
   in
   expect lexer lexbuf LBRACE;
   let stmts = aux lexer lexbuf in
-  pop ();
   SStmts stmts
 
 let parse_item lexer lexbuf =
