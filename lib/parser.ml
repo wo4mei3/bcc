@@ -1,6 +1,5 @@
 open Env
 open Syntax
-open Type
 
 type token =
   | XOR_EQ
@@ -175,13 +174,7 @@ let tok2ds = function
   | NORETURN -> FsNoreturn
   | _ -> failwith "tok2ds"
 
-type declarator =
-  | DeclPtr of declarator
-  | DeclIdent of string
-  | DeclArr of declarator * expr option
-  | DeclFun of declarator * decl list
-
-let make_decl ty d =
+let rec make_decl ty d =
   let name = ref "" in
   let rec aux ty = function
     | DeclPtr d -> aux (TPtr ty) d
@@ -189,9 +182,16 @@ let make_decl ty d =
         name := n;
         ty
     | DeclArr (d, sz) -> aux (TArr (ty, sz)) d
-    | DeclFun (d, dl) -> aux (TFun (ty, dl)) d
+    | DeclFun (d, dl) ->
+        aux (TFun (ty, List.flatten (List.map make_param dl))) d
   in
   (!name, aux ty d)
+
+and make_param (ds, dl) =
+  List.fold_left (fun l d -> make_decl (TBase ds) d :: l) [] dl
+
+and make_decl2 (ds, dl) =
+  List.fold_left (fun l (d, _) -> make_decl (TBase ds) d :: l) [] dl
 
 let rec parse_declspec' lexer lexbuf unique nonunique =
   match peek1 lexer lexbuf with
@@ -199,9 +199,11 @@ let rec parse_declspec' lexer lexbuf unique nonunique =
       next lexer lexbuf;
       tok2ds tok :: parse_declspec' lexer lexbuf true nonunique
   | STRUCT when not (unique || nonunique) ->
-      parse_struct lexer lexbuf :: parse_declspec' lexer lexbuf true nonunique
+      let ds = parse_struct lexer lexbuf in
+      ds :: parse_declspec' lexer lexbuf true nonunique
   | UNION when not (unique || nonunique) ->
-      parse_union lexer lexbuf :: parse_declspec' lexer lexbuf true nonunique
+      let ds = parse_union lexer lexbuf in
+      ds :: parse_declspec' lexer lexbuf true nonunique
   | TYPE_ID n when not (unique || nonunique) ->
       next lexer lexbuf;
       TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
@@ -217,14 +219,13 @@ let rec parse_declspec' lexer lexbuf unique nonunique =
   | _ when unique || nonunique -> []
   | _ -> failwith "expected a type specifier"
 
-and parse_declspec lexer lexbuf =
-  TBase (parse_declspec' lexer lexbuf false false)
+and parse_declspec lexer lexbuf = parse_declspec' lexer lexbuf false false
 
 and parse_fields lexer lexbuf =
   match peek1 lexer lexbuf with
   | RBRACE -> []
   | _ ->
-      let fields = List.map fst (parse_declaration lexer lexbuf) in
+      let fields = parse_declaration lexer lexbuf in
       fields @ parse_fields lexer lexbuf
 
 and parse_struct lexer lexbuf =
@@ -235,7 +236,7 @@ and parse_struct lexer lexbuf =
       next lexer lexbuf;
       let fields = parse_fields lexer lexbuf in
       let ts = TsStructDef (n, fields) in
-      add_struct (n, fields);
+      add_struct (n, List.flatten (List.map make_decl2 fields));
       expect lexer lexbuf RBRACE;
       ts
   | LBRACE, _ ->
@@ -256,7 +257,7 @@ and parse_union lexer lexbuf =
       next lexer lexbuf;
       let fields = parse_fields lexer lexbuf in
       let ts = TsUnionDef (n, fields) in
-      add_union (n, fields);
+      add_union (n, List.flatten (List.map make_decl2 fields));
       expect lexer lexbuf RBRACE;
       ts
   | LBRACE, _ ->
@@ -288,7 +289,7 @@ and parse_direct_declarator lexer lexbuf =
         let d = parse_declarator lexer lexbuf in
         expect lexer lexbuf RPAREN;
         d
-    | _ -> failwith "expected a parse_direct_declaratator"
+    | _ -> failwith "expected a direct declarator"
   in
   parse_type_suffix lexer lexbuf d
 
@@ -312,7 +313,7 @@ and parse_abstract_direct_declarator lexer lexbuf =
         expect lexer lexbuf RPAREN;
         d
     | LPAREN, _ | LBRACKET, _ -> parse_type_suffix lexer lexbuf (DeclIdent "")
-    | _ -> failwith "expected a abstract direct declaratator"
+    | _ -> failwith "expected a abstract direct declarator"
   in
   parse_type_suffix lexer lexbuf d
 
@@ -323,7 +324,7 @@ and parse_type_suffix lexer lexbuf d =
       if peek1 lexer lexbuf = TVOID && peek2 lexer lexbuf = RPAREN then (
         next lexer lexbuf;
         next lexer lexbuf;
-        DeclFun (d, [ ("", TBase [ TsVoid ]) ]))
+        DeclFun (d, [ ([ TsVoid ], []) ]))
       else parse_func_params lexer lexbuf d
   | LBRACKET ->
       next lexer lexbuf;
@@ -335,22 +336,32 @@ and parse_func_params lexer lexbuf d =
     match peek1 lexer lexbuf with
     | COMMA ->
         next lexer lexbuf;
-        let ty = parse_declspec lexer lexbuf in
+        let ds = parse_declspec lexer lexbuf in
         let d = parse_declarator lexer lexbuf in
-        make_decl ty d :: aux lexer lexbuf
+        let ds' = aux2 lexer lexbuf in
+        (ds, d :: ds') :: aux lexer lexbuf
     | RPAREN ->
         next lexer lexbuf;
         []
-    | _ -> failwith "expected a RBRACKET"
+    | _ -> failwith "expected a RPAREN"
+  and aux2 lexer lexbuf =
+    match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
+    | COMMA, tok when is_typename tok -> []
+    | RPAREN, _ -> []
+    | _ ->
+        next lexer lexbuf;
+        let d = parse_declarator lexer lexbuf in
+        d :: aux2 lexer lexbuf
   in
   match peek1 lexer lexbuf with
   | RPAREN ->
       next lexer lexbuf;
       parse_type_suffix lexer lexbuf (DeclFun (d, []))
   | _ ->
-      let ty = parse_declspec lexer lexbuf in
+      let ds = parse_declspec lexer lexbuf in
       let d' = parse_declarator lexer lexbuf in
-      DeclFun (d, make_decl ty d' :: aux lexer lexbuf)
+      let ds' = aux2 lexer lexbuf in
+      DeclFun (d, (ds, d' :: ds') :: aux lexer lexbuf)
 
 and parse_array_dims lexer lexbuf d =
   match peek1 lexer lexbuf with
@@ -363,9 +374,9 @@ and parse_array_dims lexer lexbuf d =
       parse_type_suffix lexer lexbuf (DeclArr (d, Some e))
 
 and parse_typename lexer lexbuf =
-  let ty = parse_declspec lexer lexbuf in
+  let ds = parse_declspec lexer lexbuf in
   let d = parse_abstract_declarator lexer lexbuf in
-  snd (make_decl ty d)
+  snd (make_decl (TBase ds) d)
 
 and parse_primary lexer lexbuf =
   match peek1 lexer lexbuf with
@@ -795,33 +806,33 @@ and parse_init_declarator lexer lexbuf =
   else (d, None)
 
 and parse_declaration lexer lexbuf =
-  let ty = parse_declspec lexer lexbuf in
   let rec aux lexer lexbuf =
     match peek1 lexer lexbuf with
+    | COMMA ->
+        next lexer lexbuf;
+        let ds = parse_declspec lexer lexbuf in
+        let d = parse_init_declarator lexer lexbuf in
+        let ds' = aux2 lexer lexbuf in
+        (ds, d :: ds') :: aux lexer lexbuf
     | SEMI ->
         next lexer lexbuf;
         []
+    | _ -> failwith "expected a SEMIc"
+  and aux2 lexer lexbuf =
+    match peek1 lexer lexbuf with
+    | SEMI -> []
     | COMMA ->
         next lexer lexbuf;
-        let ret =
-          match parse_init_declarator lexer lexbuf with
-          | d, Some init -> (make_decl ty d, Some init)
-          | d, None -> (make_decl ty d, None)
-        in
-        ret :: aux lexer lexbuf
-    | _ -> failwith "expected a SEMI"
+        let d = parse_init_declarator lexer lexbuf in
+        d :: aux2 lexer lexbuf
+    | _ -> failwith "expected a SEMIa"
   in
-  match peek1 lexer lexbuf with
-  | SEMI ->
-      next lexer lexbuf;
-      []
-  | _ ->
-      let ret =
-        match parse_init_declarator lexer lexbuf with
-        | d, Some init -> (make_decl ty d, Some init)
-        | d, None -> (make_decl ty d, None)
-      in
-      ret :: aux lexer lexbuf
+  let ds = parse_declspec lexer lexbuf in
+  if consume lexer lexbuf SEMI then (ds, []) :: []
+  else
+    let d = parse_init_declarator lexer lexbuf in
+    let ds' = aux2 lexer lexbuf in
+    (ds, d :: ds') :: aux lexer lexbuf
 
 let rec parse_stmt lexer lexbuf =
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
@@ -871,7 +882,7 @@ let rec parse_stmt lexer lexbuf =
       if is_typename (peek1 lexer lexbuf) then (
         let decls = parse_declaration lexer lexbuf in
         push ();
-        List.iter add_var (List.map fst decls);
+        List.iter add_var (List.flatten (List.map make_decl2 decls));
         let e2 =
           if peek1 lexer lexbuf <> SEMI then Some (parse_expr lexer lexbuf)
           else None
@@ -921,10 +932,11 @@ let rec parse_stmt lexer lexbuf =
   | LBRACE, _ -> parse_compound_stmt lexer lexbuf
   | ty, _ when is_typename ty ->
       let decls = parse_declaration lexer lexbuf in
-      List.iter add_var (List.map fst decls);
+      List.iter add_var (List.flatten (List.map make_decl2 decls));
       SDecl decls
   | _ ->
       let e = parse_expr lexer lexbuf in
+      print_endline "d";
       expect lexer lexbuf SEMI;
       SExpr (Some e)
 
@@ -933,7 +945,6 @@ and parse_compound_stmt lexer lexbuf =
     match peek1 lexer lexbuf with
     | RBRACE ->
         next lexer lexbuf;
-
         []
     | _ ->
         let s = parse_stmt lexer lexbuf in
@@ -960,10 +971,46 @@ and parse_compound_stmt_with_no_action lexer lexbuf =
   SStmts stmts
 
 let parse_item lexer lexbuf =
-  let ty = parse_declspec lexer lexbuf in
-  let d = parse_declarator lexer lexbuf in
-  if consume lexer lexbuf EQ then
-    let i = parse_init lexer lexbuf in
-    Var (make_decl ty d, Some i)
-  else if consume lexer lexbuf SEMI then Var (make_decl ty d, None)
-  else Function (make_decl ty d, parse_compound_stmt lexer lexbuf)
+  if consume lexer lexbuf SEMI then End
+  else if not (is_typename (peek1 lexer lexbuf)) then End
+  else
+    let ds = parse_declspec lexer lexbuf in
+    let rec parse_decl lexer lexbuf =
+      if consume lexer lexbuf SEMI then []
+      else if consume lexer lexbuf COMMA then
+        let d = parse_declarator lexer lexbuf in
+        let i =
+          if consume lexer lexbuf EQ then Some (parse_init lexer lexbuf)
+          else None
+        in
+        (d, i) :: parse_decl lexer lexbuf
+      else failwith "expected a semicolon"
+    in
+    if consume lexer lexbuf SEMI then Decl (ds, [])
+    else
+      let d = parse_declarator lexer lexbuf in
+      match peek1 lexer lexbuf with
+      | LBRACE -> Function ((ds, d), parse_compound_stmt lexer lexbuf)
+      | _ ->
+          if consume lexer lexbuf SEMI then Decl (ds, (d, None) :: [])
+          else if consume lexer lexbuf EQ then (
+            let decl =
+              Decl
+                ( ds,
+                  (d, Some (parse_init lexer lexbuf)) :: parse_decl lexer lexbuf
+                )
+            in
+            print_endline "a";
+            expect lexer lexbuf SEMI;
+
+            decl)
+          else
+            let decl = Decl (ds, (d, None) :: parse_decl lexer lexbuf) in
+            print_endline "b";
+            expect lexer lexbuf SEMI;
+            decl
+
+let rec parse_unit lexer lexbuf =
+  match parse_item lexer lexbuf with
+  | End -> []
+  | item -> item :: parse_unit lexer lexbuf

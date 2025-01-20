@@ -75,3 +75,42 @@ let find_union name =
   in
   if List.mem_assoc name !curr.unions then Some (List.assoc name !curr.unions)
   else aux !stack
+
+let rec get_originty =
+  let pred = function TsTypedef _ -> true | _ -> false in
+  function
+  | TBase base as ty -> (
+      try
+        match List.find pred base with
+        | TsTypedef name -> (
+            match find_typedef name with
+            | Some (_, ty) -> get_originty ty
+            | None -> failwith ("cannot find the typedef origin: " ^ name))
+        | _ -> ty
+      with _ -> ty)
+  | ty -> ty
+
+let get_retty ty =
+  match get_originty ty with
+  | TFun (ret, _) -> ret
+  | _ -> failwith "cannot get the return type"
+
+let get_basety ty =
+  match get_originty ty with
+  | TPtr ty | TArr (ty, _) -> ty
+  | _ -> failwith "not a pointer type"
+
+let get_members ty =
+  let pred = function
+    | TsStruct _ | TsUnion _ | TsStructDef _ | TsUnionDef _ -> true
+    | _ -> false
+  in
+  match get_originty ty with
+  | TBase base -> (
+      match
+        try List.find pred base with _ -> failwith "not a compound type"
+      with
+      | TsStructDef (n, _) | TsStruct n -> Option.get (find_struct n)
+      | TsUnionDef (n, _) | TsUnion n -> Option.get (find_union n)
+      | _ -> failwith "not a compound type")
+  | _ -> failwith "not a compound type"

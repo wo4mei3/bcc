@@ -56,11 +56,15 @@ and postfix =
 and init = IScal of expr | IVect of init list [@@deriving show]
 
 and stmt =
-  | SDecl of (decl * init option) list
+  | SDecl of (ds list * (declarator * init option) list) list
   | SStmts of stmt list
   | SWhile of expr * stmt
   | SDoWhile of stmt * expr
-  | SFor1 of (decl * init option) list * expr option * expr option * stmt
+  | SFor1 of
+      (ds list * (declarator * init option) list) list
+      * expr option
+      * expr option
+      * stmt
   | SFor2 of expr option * expr option * expr option * stmt
   | SIfElse of expr * stmt * stmt
   | SReturn of expr option
@@ -98,8 +102,8 @@ and ds =
   | TsStruct of string
   | TsUnion of string
   | TsEnum
-  | TsStructDef of string * (string * ty) list
-  | TsUnionDef of string * (string * ty) list
+  | TsStructDef of string * (ds list * (declarator * init option) list) list
+  | TsUnionDef of string * (ds list * (declarator * init option) list) list
   | TsEnumDef of (string * int option) list
   | TsTypedef of string
   | ScsTypedef
@@ -113,5 +117,31 @@ and ds =
   | FsNoreturn
 [@@deriving show]
 
-type item = Var of decl * init option | Function of decl * stmt
+and declarator =
+  | DeclPtr of declarator
+  | DeclIdent of string
+  | DeclArr of declarator * expr option
+  | DeclFun of declarator * (ds list * declarator list) list
 [@@deriving show]
+
+type item =
+  | Decl of ds list * (declarator * init option) list
+  | Function of (ds list * declarator) * stmt
+  | End
+[@@deriving show]
+
+type unit = item list [@@deriving show]
+
+let expr_ty = function
+  | EConst (ty, _)
+  | EVar (ty, _)
+  | EBinary (ty, _, _, _)
+  | EAssign (ty, _, _, _)
+  | EUnary (ty, _, _) ->
+      ty
+  | ETySizeof _ -> TBase [ TsInt ]
+  | EPostfix (ty, _, _)
+  | ECond (ty, _, _, _)
+  | ECast (ty, _)
+  | ECompoundLit (ty, _) ->
+      ty
