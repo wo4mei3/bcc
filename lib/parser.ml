@@ -154,7 +154,7 @@ let tok2ds = function
   | TVOID -> TsVoid
   | TBOOL -> TsBool
   | VA_LIST -> TsVarlist
-  | TYPE_ID n -> TsTypedef n
+  | TYPE_ID n -> TsTypedef (Option.get (find_typedef n))
   | TCHAR -> TsChar
   | TSHORT -> TsShort
   | TINT -> TsInt
@@ -206,7 +206,8 @@ let rec parse_declspec' lexer lexbuf unique nonunique =
       ds :: parse_declspec' lexer lexbuf true nonunique
   | TYPE_ID n when not (unique || nonunique) ->
       next lexer lexbuf;
-      TsTypedef n :: parse_declspec' lexer lexbuf true nonunique
+      TsTypedef (Option.get (find_typedef n))
+      :: parse_declspec' lexer lexbuf true nonunique
   | (TCHAR | TSHORT | TINT | TLONG | TFLOAT | TDOUBLE | TSIGNED | TUNSIGNED) as
     tok
     when not unique ->
@@ -231,43 +232,57 @@ and parse_fields lexer lexbuf =
 and parse_struct lexer lexbuf =
   expect lexer lexbuf STRUCT;
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
-  | ID n, LBRACE ->
+  | (ID n| TYPE_ID n), LBRACE ->
       next lexer lexbuf;
       next lexer lexbuf;
       let fields = parse_fields lexer lexbuf in
-      let ts = TsStructDef (n, fields) in
       add_struct (n, List.flatten (List.map make_decl2 fields));
+      let ts = TsStruct (List.length !structs) in
       expect lexer lexbuf RBRACE;
       ts
   | LBRACE, _ ->
       next lexer lexbuf;
-      let ts = TsStructDef ("", parse_fields lexer lexbuf) in
+      let fields = parse_fields lexer lexbuf in
+      add_struct ("", List.flatten (List.map make_decl2 fields));
+      let ts = TsStruct (List.length !structs) in
       expect lexer lexbuf RBRACE;
       ts
-  | ID n, _ ->
+  | (ID n | TYPE_ID n), _ -> (
       next lexer lexbuf;
-      TsStruct n
+      match find_struct n with
+      | Some id -> TsStruct id
+      | None ->
+          add_struct (n, []);
+          let ts = TsStruct (List.length !structs) in
+          ts)
   | _ -> failwith "expected a identifier or a lbrace"
 
 and parse_union lexer lexbuf =
   expect lexer lexbuf STRUCT;
   match (peek1 lexer lexbuf, peek2 lexer lexbuf) with
-  | ID n, LBRACE ->
+  | (ID n | TYPE_ID n), LBRACE ->
       next lexer lexbuf;
       next lexer lexbuf;
       let fields = parse_fields lexer lexbuf in
-      let ts = TsUnionDef (n, fields) in
       add_union (n, List.flatten (List.map make_decl2 fields));
+      let ts = TsUnion (List.length !unions) in
       expect lexer lexbuf RBRACE;
       ts
   | LBRACE, _ ->
       next lexer lexbuf;
-      let ts = TsUnionDef ("", parse_fields lexer lexbuf) in
+      let fields = parse_fields lexer lexbuf in
+      add_union ("", List.flatten (List.map make_decl2 fields));
+      let ts = TsUnion (List.length !unions) in
       expect lexer lexbuf RBRACE;
       ts
-  | ID n, _ ->
+  | (ID n| TYPE_ID n), _ -> (
       next lexer lexbuf;
-      TsStruct n
+      match find_union n with
+      | Some id -> TsUnion id
+      | None ->
+          add_union (n, []);
+          let ts = TsUnion (List.length !unions) in
+          ts)
   | _ -> failwith "expected a identifier or a lbrace"
 
 and parse_declarator lexer lexbuf =
@@ -383,7 +398,7 @@ and parse_primary lexer lexbuf =
   | ID n -> (
       next lexer lexbuf;
       match find_var n with
-      | Some ty -> EVar (ty, n)
+      | Some (id, ty) -> EVar (ty, id)
       | None -> failwith ("var not find: " ^ n))
   | INT i ->
       next lexer lexbuf;
@@ -455,8 +470,8 @@ and parse_postfix lexer lexbuf =
         in
         next lexer lexbuf;
         let ty =
-          try List.assoc id (get_members (expr_ty e))
-          with _ -> failwith ("no member found: " ^ id)
+          (*try*) List.assoc id (get_members (expr_ty e))
+          (*with _ -> failwith ("no member found: " ^ id)*)
         in
         let e = EPostfix (ty, e, PDot id) in
         aux lexer lexbuf e

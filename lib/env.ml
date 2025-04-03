@@ -1,12 +1,17 @@
 open Syntax
 
 type scope = {
-  vars : (string * ty) list;
-  structs : (string * (string * ty) list) list;
-  unions : (string * (string * ty) list) list;
-  enums : (string * string list) list;
+  vars : int list;
+  structs : int list;
+  unions : int list;
+  enums : int list;
 }
 [@@deriving show]
+
+let vars : (string * ty) list ref = ref []
+let structs : (string * (string * ty) list) list ref = ref []
+let unions : (string * (string * ty) list) list ref = ref []
+let enums : (string * string list) list ref = ref []
 
 type stack = scope list
 
@@ -21,60 +26,110 @@ let pop () =
   curr := List.hd !stack;
   stack := List.tl !stack
 
-let add_var pair = curr := { !curr with vars = pair :: !curr.vars }
-let add_struct pair = curr := { !curr with structs = pair :: !curr.structs }
-let add_union pair = curr := { !curr with unions = pair :: !curr.unions }
-let add_enum pair = curr := { !curr with enums = pair :: !curr.enums }
+let insert id item env =
+  let rec aux = function
+    | 0, _ :: xs -> item :: xs
+    | i, x :: xs -> x :: aux (i - 1, xs)
+    | _, [] -> []
+  in
+  env := List.rev (aux (id - 1, List.rev !env))
 
-let is_typedef name decl =
+let rec find_index name scope env =
+  match scope with
+  | id :: rest -> (
+      match List.nth (List.rev env) (id - 1) with
+      | n, item when n = name -> Some (id, item)
+      | _ -> find_index name rest env)
+  | [] -> None
+
+let is_typedef ty =
   let rec aux = function
     | TFun (ty, _) | TPtr ty | TArr (ty, _) -> aux ty
     | TBase base -> List.mem ScsTypedef base
   in
-  fst decl = name && aux (snd decl)
+  aux ty
 
 let find_var name =
   let rec aux = function
     | [] -> None
-    | x :: xs when List.mem_assoc name x.vars ->
-        let ty = List.assoc name x.vars in
-        if is_typedef name (name, ty) then aux xs else Some ty
-    | _ :: xs -> aux xs
+    | x :: xs -> (
+        match find_index name x.vars !vars with
+        | Some (id, ty) -> if is_typedef ty then aux xs else Some (id, ty)
+        | None -> aux xs)
   in
-  if List.mem_assoc name !curr.vars then Some (List.assoc name !curr.vars)
-  else aux !stack
+  aux (!curr :: !stack)
 
 let find_typedef name =
   let rec aux = function
     | [] -> None
     | x :: xs -> (
-        match List.find_opt (is_typedef name) x.vars with
-        | Some x -> Some x
+        match find_index name x.vars !vars with
+        | Some (id, ty) -> if is_typedef ty then Some id else aux xs
         | None -> aux xs)
   in
-  match List.find_opt (is_typedef name) !curr.vars with
-  | Some x -> Some x
-  | None -> aux !stack
+  aux (!curr :: !stack)
 
 let find_struct name =
   let rec aux = function
     | [] -> None
-    | x :: _ when List.mem_assoc name x.structs ->
-        Some (List.assoc name x.structs)
-    | _ :: xs -> aux xs
+    | x :: xs -> (
+        match find_index name x.structs !structs with
+        | Some (id, _) -> Some id
+        | None -> aux xs)
   in
-  if List.mem_assoc name !curr.structs then Some (List.assoc name !curr.structs)
-  else aux !stack
+  aux (!curr :: !stack)
+
+let find_current_struct name =
+  let rec aux = function
+    | [] -> None
+    | x :: xs -> (
+        match find_index name x.structs !structs with
+        | Some (id, _) -> Some id
+        | None -> aux xs)
+  in
+  aux (!curr :: [])
 
 let find_union name =
   let rec aux = function
     | [] -> None
-    | x :: _ when List.mem_assoc name x.unions ->
-        Some (List.assoc name x.unions)
-    | _ :: xs -> aux xs
+    | x :: xs -> (
+        match find_index name x.unions !unions with
+        | Some (id, _) -> Some id
+        | None -> aux xs)
   in
-  if List.mem_assoc name !curr.unions then Some (List.assoc name !curr.unions)
-  else aux !stack
+  aux (!curr :: !stack)
+
+let find_current_union name =
+  let rec aux = function
+    | [] -> None
+    | x :: xs -> (
+        match find_index name x.unions !unions with
+        | Some (id, _) -> Some id
+        | None -> aux xs)
+  in
+  aux (!curr :: [])
+
+let add_var item =
+  vars := item :: !vars;
+  curr := { !curr with vars = List.length !vars :: !curr.vars }
+
+let add_struct (name, item) =
+  match find_struct name with
+  | Some id -> insert id (name, item) structs
+  | None ->
+      structs := (name, item) :: !structs;
+      curr := { !curr with structs = List.length !structs :: !curr.structs }
+
+let add_union (name, item) =
+  match find_current_union name with
+  | Some id -> insert id (name, item) unions
+  | None ->
+      unions := (name, item) :: !unions;
+      curr := { !curr with unions = List.length !unions :: !curr.unions }
+
+let add_enum item =
+  enums := item :: !enums;
+  curr := { !curr with enums = List.length !enums :: !curr.enums }
 
 let rec get_originty =
   let pred = function TsTypedef _ -> true | _ -> false in
@@ -82,10 +137,8 @@ let rec get_originty =
   | TBase base as ty -> (
       try
         match List.find pred base with
-        | TsTypedef name -> (
-            match find_typedef name with
-            | Some (_, ty) -> get_originty ty
-            | None -> failwith ("cannot find the typedef origin: " ^ name))
+        | TsTypedef id -> (
+            match List.nth (List.rev !vars) (id-1) with _, ty -> get_originty ty)
         | _ -> ty
       with _ -> ty)
   | ty -> ty
@@ -110,7 +163,8 @@ let get_members ty =
       match
         try List.find pred base with _ -> failwith "not a compound type"
       with
-      | TsStructDef (n, _) | TsStruct n -> Option.get (find_struct n)
-      | TsUnionDef (n, _) | TsUnion n -> Option.get (find_union n)
+      | TsStruct id ->
+          snd (List.nth (List.rev !structs) (id - 1))
+      | TsUnion id -> snd (List.nth (List.rev !unions) (id - 1))
       | _ -> failwith "not a compound type")
   | _ -> failwith "not a compound type"

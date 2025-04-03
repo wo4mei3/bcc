@@ -33,7 +33,7 @@ type unary = Plus | Minus | BitNot | LogNot | Ref | Deref | Sizeof | Inc | Dec
 
 and expr =
   | EConst of ty * value
-  | EVar of ty * string
+  | EVar of ty * int
   | EBinary of ty * binary * expr * expr
   | EAssign of ty * binary option * expr * expr
   | EUnary of ty * unary * expr
@@ -99,13 +99,13 @@ and ds =
   | TsFloat
   | TsDouble
   | TsVoid
-  | TsStruct of string
-  | TsUnion of string
-  | TsEnum
+  | TsStruct of int
+  | TsUnion of int
+  | TsEnum of int
   | TsStructDef of string * (ds list * (declarator * init option) list) list
   | TsUnionDef of string * (ds list * (declarator * init option) list) list
   | TsEnumDef of (string * int option) list
-  | TsTypedef of string
+  | TsTypedef of int
   | ScsTypedef
   | ScsExtern
   | ScsStatic

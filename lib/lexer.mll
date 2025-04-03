@@ -74,14 +74,6 @@ rule token = parse
 | "switch"    { SWITCH }
 | "case"      { CASE }
 | "default"   { DEFAULT }
-| "dyn"       { DYN }
-| "drop"      { DROP }
-| "using"     { USING }
-| "lifetime"  { LIFETIME }
-| "depth"     { DEPTH }
-| "kind"      { KIND }
-| "unsafe"    { UNSAFE }
-| "null"      { NULL }
 | '+'         { PLUS }
 | "++"        { INC }
 | '-'         { MINUS }
